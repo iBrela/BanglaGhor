@@ -33,3 +33,7 @@ yarn-error.log*
 
 node_modules
 server/node_modules
+
+#ENV FILES
+.env
+.env.development

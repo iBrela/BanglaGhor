@@ -1,19 +1,21 @@
-// seedProperties.js (Updated for New Schema & ReferenceError Fix)
-const mongoose = require("mongoose");
-// Ensure this path points to your UPDATED Property model definition
-const Property = require("./models/property"); // Adjust path if needed
+require("dotenv").config({ path: "./.env" });
 
-// Use your existing connection string or environment variable
-const MONGO_URI =
-  process.env.MONGO_URI || // Use environment variable if set
-  "mongodb+srv://103531273:forctpA2025@cluster1.wmpcxe1.mongodb.net/BanglaGhar?retryWrites=true&w=majority&appName=Cluster1"; // Fallback
+const mongoose = require("mongoose");
+const Property = require("./models/property");
+
+const MONGO_URI = process.env.MONGO_URI;
+
+if (!MONGO_URI) {
+  console.error("No MONGO_URI found in .env");
+  process.exit(1);
+}
 
 mongoose
   .connect(MONGO_URI)
   .then(() => console.log("Connected to MongoDB for seeding"))
   .catch((err) => {
     console.error("MongoDB connection error:", err.message);
-    process.exit(1); // Exit if connection fails
+    process.exit(1);
   });
 
 // --- Helper Data for New Structure ---
