@@ -122,6 +122,10 @@ router.get(
       .optional()
       .isBoolean()
       .withMessage("isFeatured filter must be true or false."),
+    query("deleted")
+      .optional()
+      .isBoolean()
+      .withMessage("deleted filter must be true or false."),
   ],
   handleValidationErrors,
   adminController.getAllListings
@@ -147,21 +151,43 @@ router.put(
   adminController.featureListing
 );
 
+const listingIdsValidator = [
+  body("listingIds")
+    .isArray({ min: 1 })
+    .withMessage("listingIds must be a non-empty array.")
+    .custom((ids) => {
+      if (!ids.every((id) => mongoose.Types.ObjectId.isValid(id))) {
+        throw new Error("One or more listing IDs are invalid.");
+      }
+      return true;
+    }),
+];
+
+// Soft delete (move to Recycle Bin)
 router.post(
   "/listings/delete-multiple",
-  [
-    body("listingIds")
-      .isArray({ min: 1 })
-      .withMessage("listingIds must be a non-empty array.")
-      .custom((ids) => {
-        if (!ids.every((id) => mongoose.Types.ObjectId.isValid(id))) {
-          throw new Error("One or more listing IDs are invalid.");
-        }
-        return true;
-      }),
-  ],
+  listingIdsValidator,
   handleValidationErrors,
-  adminController.deleteMultipleListings
+  adminController.softDeleteListings
 );
+
+// Restore a single listing from the Recycle Bin
+router.put(
+  "/listings/:listingId/restore",
+  [param("listingId").isMongoId().withMessage("Invalid listing ID format.")],
+  handleValidationErrors,
+  adminController.restoreListing
+);
+
+// Permanently delete listings already in the Recycle Bin (irreversible)
+router.post(
+  "/listings/permanent-delete",
+  listingIdsValidator,
+  handleValidationErrors,
+  adminController.permanentlyDeleteListings
+);
+
+// Permanently delete EVERY listing in the Recycle Bin, across all pages (irreversible)
+router.post("/listings/empty-recycle-bin", adminController.emptyRecycleBin);
 
 module.exports = router;

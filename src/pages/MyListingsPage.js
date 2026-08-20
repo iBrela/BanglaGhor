@@ -22,7 +22,9 @@ const MyListingsPage = () => {
   const navigate = useNavigate();
 
   const handleEditProperty = (propertyId) => {
-    navigate(`/edit-property/${propertyId}`);
+    navigate(`/edit-property/${propertyId}`, {
+      state: { from: "my-listings" },
+    });
   };
 
   const renderContent = () => {

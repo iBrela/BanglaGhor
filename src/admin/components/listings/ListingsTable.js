@@ -22,6 +22,8 @@ import VisibilityOffIcon from "@mui/icons-material/VisibilityOff";
 import StarIcon from "@mui/icons-material/Star";
 import StarBorderIcon from "@mui/icons-material/StarBorder";
 import EditIcon from "@mui/icons-material/Edit";
+import RestoreFromTrashIcon from "@mui/icons-material/RestoreFromTrash";
+import DeleteForeverIcon from "@mui/icons-material/DeleteForever";
 import { format } from "date-fns";
 import { formatPrice } from "../../../utils/formatPrice";
 
@@ -108,7 +110,10 @@ const ListingsTable = ({
   onRequestSort,
   onVisibilityToggle,
   onFeatureToggle,
+  onRestoreSingle,
+  onPermanentDeleteSingle,
   bulkDeleteLoading,
+  mode = "active",
 }) => {
   const navigate = useNavigate();
 
@@ -202,8 +207,11 @@ const ListingsTable = ({
                 const labelId = `enhanced-table-checkbox-${l._id}`;
                 const hidKey = `visibility-${l._id}`;
                 const featKey = `feature-${l._id}`;
+                const restoreKey = `restore-${l._id}`;
                 const isActionLoading =
-                  actionLoading[hidKey] || actionLoading[featKey];
+                  actionLoading[hidKey] ||
+                  actionLoading[featKey] ||
+                  actionLoading[restoreKey];
                 const isFeatured = l.featuredAt != null;
 
                 return (
@@ -273,64 +281,103 @@ const ListingsTable = ({
                     <TableCell>{l.createdBy}</TableCell>
                     <TableCell>{formatDate(l.createdAt)}</TableCell>
                     <TableCell align="center" sx={{ whiteSpace: "nowrap" }}>
-                      <Tooltip title="Edit Listing">
-                        <span>
-                          <IconButton
-                            size="small"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              navigate(`/edit-property/${l._id}`);
-                            }}
-                            disabled={bulkDeleteLoading}
+                      {mode === "trash" ? (
+                        <>
+                          <Tooltip title="Restore Listing">
+                            <span>
+                              <IconButton
+                                size="small"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onRestoreSingle(l._id);
+                                }}
+                                disabled={isActionLoading || bulkDeleteLoading}
+                                color="success"
+                              >
+                                <RestoreFromTrashIcon fontSize="small" />
+                              </IconButton>
+                            </span>
+                          </Tooltip>
+                          <Tooltip title="Permanently Delete">
+                            <span>
+                              <IconButton
+                                size="small"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onPermanentDeleteSingle(l._id);
+                                }}
+                                disabled={isActionLoading || bulkDeleteLoading}
+                                color="error"
+                              >
+                                <DeleteForeverIcon fontSize="small" />
+                              </IconButton>
+                            </span>
+                          </Tooltip>
+                        </>
+                      ) : (
+                        <>
+                          <Tooltip title="Edit Listing">
+                            <span>
+                              <IconButton
+                                size="small"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  navigate(`/edit-property/${l._id}`, {
+                                    state: { from: "admin" },
+                                  });
+                                }}
+                                disabled={bulkDeleteLoading}
+                              >
+                                <EditIcon fontSize="small" />
+                              </IconButton>
+                            </span>
+                          </Tooltip>
+                          <Tooltip
+                            title={l.isHidden ? "Make Visible" : "Hide Listing"}
                           >
-                            <EditIcon fontSize="small" />
-                          </IconButton>
-                        </span>
-                      </Tooltip>
-                      <Tooltip
-                        title={l.isHidden ? "Make Visible" : "Hide Listing"}
-                      >
-                        <span>
-                          <IconButton
-                            size="small"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              onVisibilityToggle(l._id, l.isHidden);
-                            }}
-                            disabled={isActionLoading || bulkDeleteLoading}
-                            color={l.isHidden ? "warning" : "default"}
+                            <span>
+                              <IconButton
+                                size="small"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onVisibilityToggle(l._id, l.isHidden);
+                                }}
+                                disabled={isActionLoading || bulkDeleteLoading}
+                                color={l.isHidden ? "warning" : "default"}
+                              >
+                                {l.isHidden ? (
+                                  <VisibilityOffIcon fontSize="small" />
+                                ) : (
+                                  <VisibilityIcon fontSize="small" />
+                                )}
+                              </IconButton>
+                            </span>
+                          </Tooltip>
+                          <Tooltip
+                            title={
+                              isFeatured ? "Unfeature Listing" : "Feature Listing"
+                            }
                           >
-                            {l.isHidden ? (
-                              <VisibilityOffIcon fontSize="small" />
-                            ) : (
-                              <VisibilityIcon fontSize="small" />
-                            )}
-                          </IconButton>
-                        </span>
-                      </Tooltip>
-                      <Tooltip
-                        title={
-                          isFeatured ? "Unfeature Listing" : "Feature Listing"
-                        }
-                      >
-                        <span>
-                          <IconButton
-                            size="small"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              onFeatureToggle(l._id, l.featuredAt);
-                            }}
-                            disabled={isActionLoading || bulkDeleteLoading}
-                            color={isFeatured ? "warning" : "default"}
-                          >
-                            {isFeatured ? (
-                              <StarIcon fontSize="small" />
-                            ) : (
-                              <StarBorderIcon fontSize="small" />
-                            )}
-                          </IconButton>
-                        </span>
-                      </Tooltip>
+                            <span>
+                              <IconButton
+                                size="small"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onFeatureToggle(l._id, l.featuredAt);
+                                }}
+                                disabled={isActionLoading || bulkDeleteLoading}
+                                color={isFeatured ? "warning" : "default"}
+                              >
+                                {isFeatured ? (
+                                  <StarIcon fontSize="small" />
+                                ) : (
+                                  <StarBorderIcon fontSize="small" />
+                                )}
+                              </IconButton>
+                            </span>
+                          </Tooltip>
+                        </>
+                      )}
                       {/* Match original loading indicator */}
                       {isActionLoading && (
                         <CircularProgress

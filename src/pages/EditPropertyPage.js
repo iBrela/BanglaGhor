@@ -7,7 +7,7 @@ import {
   Alert,
   Box,
 } from "@mui/material";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import useEditPropertyForm from "../features/listing/hooks/useEditPropertyForm"; 
 import EditPropertyForm from "../features/listing/components/EditPropertyForm"; 
@@ -16,8 +16,12 @@ import { useSnackbar } from "../context/SnackbarContext";
 const EditPropertyPage = () => {
   const { propertyId } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const { t } = useTranslation();
   const { showSnackbar } = useSnackbar();
+
+  const returnTo =
+    location.state?.from === "admin" ? "/admin/listings" : "/my-listings";
 
   const {
     propertyData,
@@ -40,7 +44,7 @@ const EditPropertyPage = () => {
         t("property_updated_success", "Property updated successfully!"),
         "success"
       );
-      navigate("/my-listings");
+      navigate(returnTo);
     } else {
       // Error is handled by the hook and displayed in the form or as a general error
       showSnackbar(

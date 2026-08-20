@@ -1,7 +1,11 @@
 const Property = require("../models/property.js");
 const mongoose = require("mongoose");
 const axios = require("axios");
-const { S3Client, PutObjectCommand } = require("@aws-sdk/client-s3");
+const {
+  S3Client,
+  PutObjectCommand,
+  DeleteObjectCommand,
+} = require("@aws-sdk/client-s3");
 const { v4: uuidv4 } = require("uuid");
 
 // ============================================================================
@@ -29,6 +33,53 @@ const S3_PROPERTY_IMAGES_FOLDER = "property-images/";
 // ============================================================================
 // Helper: Build S3 object URL (AWS or LocalStack format)
 // ============================================================================
+// ============================================================================
+// Helper: Extract S3 key from a property image URL (handles AWS + LocalStack)
+// ============================================================================
+function extractS3KeyFromUrl(url) {
+  if (!url) return null;
+  try {
+    const urlObj = new URL(url);
+    if (urlObj.hostname === "localhost" || urlObj.hostname === "127.0.0.1") {
+      const pathParts = urlObj.pathname.split("/").filter(Boolean);
+      pathParts.shift(); // Remove bucket name (first segment)
+      return decodeURIComponent(pathParts.join("/"));
+    }
+    if (urlObj.hostname.endsWith("amazonaws.com")) {
+      return decodeURIComponent(urlObj.pathname.substring(1));
+    }
+    return null;
+  } catch (e) {
+    // Not a parseable absolute URL (e.g. legacy/seed data like "house1.png") - skip it.
+    return null;
+  }
+}
+
+// ============================================================================
+// Helper: Permanently delete property images from S3/LocalStack.
+// Used ONLY by admin permanent-delete (never on soft delete or hide/unfeature).
+// Errors on individual images are logged and skipped, not thrown, so a bad
+// image URL never blocks the rest of the cleanup or the DB deletion itself.
+// ============================================================================
+async function deletePropertyImages(imageUrls) {
+  if (!Array.isArray(imageUrls) || imageUrls.length === 0) return;
+  for (const url of imageUrls) {
+    const key = extractS3KeyFromUrl(url);
+    if (!key) continue;
+    try {
+      await propertyImagesS3Client.send(
+        new DeleteObjectCommand({
+          Bucket: S3_PROPERTY_IMAGES_BUCKET,
+          Key: key,
+        })
+      );
+    } catch (err) {
+      console.error(`Failed to delete S3 image (${url}):`, err.message);
+    }
+  }
+}
+exports.deletePropertyImages = deletePropertyImages;
+
 function buildS3ObjectUrl(bucket, key) {
   if (process.env.USE_LOCALSTACK === "true") {
     const endpoint = process.env.LOCALSTACK_ENDPOINT || "http://localhost:4566";
@@ -296,6 +347,7 @@ exports.getAllProperties = async (req, res) => {
 
     const baseFilter = {
       isHidden: { $ne: true },
+      isDeleted: { $ne: true },
     };
 
     if (req.query.includeUnavailable !== "true") {
@@ -390,6 +442,7 @@ exports.getPropertyById = async (req, res) => {
     const property = await Property.findOne({
       _id: req.params.id,
       isHidden: { $ne: true },
+      isDeleted: { $ne: true },
     }).populate(
       "createdBy",
       "_id displayName email cognitoSub profilePictureUrl"
@@ -689,6 +742,7 @@ exports.batchGeocodeProperties = async (req, res) => {
     }
 
     const properties = await Property.find({
+      isDeleted: { $ne: true },
       $or: [
         { latitude: { $exists: false } },
         { longitude: { $exists: false } },

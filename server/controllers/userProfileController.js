@@ -235,7 +235,10 @@ exports.getMyListings = async (req, res) => {
       );
       return res.status(200).json([]);
     }
-    const userListings = await Property.find({ createdBy: userProfile._id })
+    const userListings = await Property.find({
+      createdBy: userProfile._id,
+      isDeleted: { $ne: true },
+    })
       .sort({ createdAt: -1 })
       .select(
         "title price listingType propertyType images addressLine1 cityTown district createdAt isHidden bedrooms bathrooms area"

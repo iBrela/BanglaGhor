@@ -148,6 +148,22 @@ const propertySchema = new mongoose.Schema(
       index: true,
     },
 
+    // Soft delete (admin Recycle Bin)
+    isDeleted: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    deletedAt: {
+      type: Date,
+      default: null,
+    },
+    deletedBy: {
+      type: Schema.Types.ObjectId,
+      ref: "UserProfile",
+      default: null,
+    },
+
     // Description & Images
     description: { type: String },
     images: {

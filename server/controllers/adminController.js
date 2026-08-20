@@ -4,6 +4,7 @@ const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
 const Property = require("../models/property");
 const mongoose = require("mongoose");
 const { subDays } = require("date-fns");
+const { deletePropertyImages } = require("./propertyController");
 
 // ============================================================================
 // S3 Client Setup (AWS by default, LocalStack when USE_LOCALSTACK=true)
@@ -63,10 +64,16 @@ exports.getDashboardStats = async (req, res) => {
       recentListingsCount,
       recentUsersCount,
     ] = await Promise.all([
-      Property.countDocuments({ isHidden: { $ne: true } }),
+      Property.countDocuments({
+        isHidden: { $ne: true },
+        isDeleted: { $ne: true },
+      }),
       UserProfile.countDocuments({ approvalStatus: "pending" }),
       UserProfile.countDocuments({}),
-      Property.countDocuments({ createdAt: { $gte: sevenDaysAgo } }),
+      Property.countDocuments({
+        createdAt: { $gte: sevenDaysAgo },
+        isDeleted: { $ne: true },
+      }),
       UserProfile.countDocuments({ createdAt: { $gte: sevenDaysAgo } }),
     ]);
     res.status(200).json({
@@ -366,8 +373,11 @@ exports.getAllListings = async (req, res) => {
     const filterPropertyType = req.query.propertyType || "";
     const filterIsHidden = req.query.isHidden;
     const filterIsFeatured = req.query.isFeatured;
+    const showDeleted = req.query.deleted === "true";
     const skip = (page - 1) * limit;
-    let filterQuery = {};
+    let filterQuery = {
+      isDeleted: showDeleted ? true : { $ne: true },
+    };
     if (searchTerm) {
       const regex = new RegExp(searchTerm, "i");
       filterQuery.$or = [
@@ -411,7 +421,7 @@ exports.getAllListings = async (req, res) => {
     const totalListings = await Property.countDocuments(filterQuery);
     const listings = await Property.find(filterQuery)
       .select(
-        "title price addressLine1 cityTown district upazila propertyType listingType createdBy createdAt images isHidden featuredAt"
+        "title price addressLine1 cityTown district upazila propertyType listingType createdBy createdAt images isHidden featuredAt isDeleted deletedAt"
       )
       .sort(sortObject)
       .skip(skip)
@@ -530,7 +540,13 @@ exports.featureListing = async (req, res) => {
   }
 };
 
-exports.deleteMultipleListings = async (req, res) => {
+// ============================================================================
+// Soft delete: moves listings to the Recycle Bin (isDeleted: true).
+// Does NOT touch S3 images or the database row itself - fully reversible via
+// restoreListing. Only ever targets currently-active (not already deleted)
+// listings.
+// ============================================================================
+exports.softDeleteListings = async (req, res) => {
   const { listingIds } = req.body;
   if (!Array.isArray(listingIds) || listingIds.length === 0) {
     return res.status(400).json({
@@ -548,28 +564,164 @@ exports.deleteMultipleListings = async (req, res) => {
     return res.status(400).json({ message: "No valid listing IDs provided." });
   }
   try {
-    const deleteResult = await Property.deleteMany({
-      _id: { $in: validIds },
-    });
-    if (deleteResult.deletedCount === 0) {
+    const updateResult = await Property.updateMany(
+      { _id: { $in: validIds }, isDeleted: { $ne: true } },
+      {
+        $set: {
+          isDeleted: true,
+          deletedAt: new Date(),
+          deletedBy: req.userProfile._id,
+        },
+      }
+    );
+    if (updateResult.modifiedCount === 0) {
       console.log(
-        `Admin ${req.user.email} attempted to delete listings, but none matched the provided IDs:`,
+        `Admin ${req.user.email} attempted to move listings to Recycle Bin, but none matched the provided IDs:`,
         validIds
       );
       return res
         .status(404)
-        .json({ message: "No matching listings found to delete." });
+        .json({ message: "No matching active listings found to delete." });
     }
     console.log(
-      `Admin ${req.user.email} deleted ${deleteResult.deletedCount} listing(s):`,
+      `Admin ${req.user.email} moved ${updateResult.modifiedCount} listing(s) to the Recycle Bin:`,
       validIds
     );
     res.status(200).json({
-      message: `${deleteResult.deletedCount} listing(s) deleted successfully.`,
-      deletedCount: deleteResult.deletedCount,
+      message: `${updateResult.modifiedCount} listing(s) moved to the Recycle Bin.`,
+      deletedCount: updateResult.modifiedCount,
     });
   } catch (error) {
-    console.error("Error deleting multiple listings:", error);
-    res.status(500).json({ message: "Server error during bulk deletion." });
+    console.error("Error moving listings to Recycle Bin:", error);
+    res.status(500).json({ message: "Server error during deletion." });
+  }
+};
+
+// ============================================================================
+// Restore a single listing out of the Recycle Bin.
+// ============================================================================
+exports.restoreListing = async (req, res) => {
+  const { listingId } = req.params;
+  if (!mongoose.Types.ObjectId.isValid(listingId)) {
+    return res.status(400).json({ message: "Invalid listing ID format." });
+  }
+  try {
+    const restoredProperty = await Property.findOneAndUpdate(
+      { _id: listingId, isDeleted: true },
+      { $set: { isDeleted: false, deletedAt: null, deletedBy: null } },
+      { new: true }
+    );
+    if (!restoredProperty) {
+      return res.status(404).json({
+        message: "Listing not found in the Recycle Bin.",
+      });
+    }
+    console.log(
+      `Admin ${req.user.email} restored listing ${listingId} from the Recycle Bin.`
+    );
+    res.status(200).json({
+      message: "Listing restored successfully.",
+      listing: restoredProperty,
+    });
+  } catch (error) {
+    console.error(`Error restoring listing ${listingId}:`, error);
+    res.status(500).json({ message: "Server error restoring listing." });
+  }
+};
+
+// ============================================================================
+// Shared core for permanent deletion. `filter` MUST always constrain to
+// isDeleted: true - callers are responsible for that, and both callers below
+// hardcode it themselves so it can never be built from raw client input.
+// Cleans up S3/LocalStack images before removing the database records; an
+// image cleanup failure is logged but never blocks the deletion itself.
+// ============================================================================
+async function permanentlyDeleteByFilter(filter, adminEmail) {
+  const propertiesToDelete = await Property.find(filter).select("_id images");
+
+  if (propertiesToDelete.length === 0) {
+    return { deletedCount: 0 };
+  }
+
+  for (const property of propertiesToDelete) {
+    await deletePropertyImages(property.images);
+  }
+
+  const idsToDelete = propertiesToDelete.map((p) => p._id);
+  const deleteResult = await Property.deleteMany({
+    _id: { $in: idsToDelete },
+    isDeleted: true,
+  });
+
+  console.log(
+    `Admin ${adminEmail} permanently deleted ${deleteResult.deletedCount} listing(s):`,
+    idsToDelete
+  );
+  return { deletedCount: deleteResult.deletedCount };
+}
+
+// ============================================================================
+// Permanently delete specific listings by ID. Only ever operates on listings
+// that are ALREADY in the Recycle Bin (isDeleted: true) - refuses to touch
+// active listings even if their ID is passed in, as a safety backstop.
+// ============================================================================
+exports.permanentlyDeleteListings = async (req, res) => {
+  const { listingIds } = req.body;
+  if (!Array.isArray(listingIds) || listingIds.length === 0) {
+    return res.status(400).json({
+      message:
+        "Invalid request: Listing IDs must be provided as a non-empty array.",
+    });
+  }
+  const validIds = listingIds.filter((id) =>
+    mongoose.Types.ObjectId.isValid(id)
+  );
+  if (validIds.length === 0) {
+    return res.status(400).json({ message: "No valid listing IDs provided." });
+  }
+  try {
+    const { deletedCount } = await permanentlyDeleteByFilter(
+      { _id: { $in: validIds }, isDeleted: true },
+      req.user.email
+    );
+    if (deletedCount === 0) {
+      return res.status(404).json({
+        message: "No matching Recycle Bin listings found to permanently delete.",
+      });
+    }
+    res.status(200).json({
+      message: `${deletedCount} listing(s) permanently deleted.`,
+      deletedCount,
+    });
+  } catch (error) {
+    console.error("Error permanently deleting listings:", error);
+    res
+      .status(500)
+      .json({ message: "Server error during permanent deletion." });
+  }
+};
+
+// ============================================================================
+// Permanently delete EVERY listing currently in the Recycle Bin, across all
+// pages. The filter is hardcoded to isDeleted: true and takes no input from
+// the request body, so active listings can never be reached by this route
+// regardless of what the client sends.
+// ============================================================================
+exports.emptyRecycleBin = async (req, res) => {
+  try {
+    const { deletedCount } = await permanentlyDeleteByFilter(
+      { isDeleted: true },
+      req.user.email
+    );
+    res.status(200).json({
+      message:
+        deletedCount > 0
+          ? `${deletedCount} listing(s) permanently deleted.`
+          : "Recycle Bin was already empty.",
+      deletedCount,
+    });
+  } catch (error) {
+    console.error("Error emptying Recycle Bin:", error);
+    res.status(500).json({ message: "Server error emptying Recycle Bin." });
   }
 };

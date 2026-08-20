@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import axios from "axios";
 import { debounce } from "@mui/material";
 import { useAuth } from "../../context/AuthContext";
@@ -14,6 +14,9 @@ export const useManageListings = () => {
   const { idToken } = useAuth();
   const { showSnackbar } = useSnackbar();
 
+  // "active" = normal Manage Listings view, "trash" = Recycle Bin view
+  const [viewMode, setViewModeState] = useState("active");
+
   // State for Pagination, Sorting, Filtering
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(25);
@@ -28,9 +31,10 @@ export const useManageListings = () => {
 
   // State for Actions
   const [actionLoading, setActionLoading] = useState({});
-  const [bulkDeleteLoading, setBulkDeleteLoading] = useState(false);
+  const [bulkActionLoading, setBulkActionLoading] = useState(false);
   const [selected, setSelected] = useState([]);
-  const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
+  // { type: "softDelete" | "permanentDelete", ids: string[], context: "selected" | "all" } | null
+  const [confirmAction, setConfirmAction] = useState(null);
 
   const resetPage = useCallback(() => {
     setPage(0);
@@ -47,6 +51,13 @@ export const useManageListings = () => {
     };
   }, [debouncedResetPage]);
 
+  const setViewMode = useCallback((mode) => {
+    setViewModeState(mode);
+    setPage(0);
+    setSelected([]);
+    setConfirmAction(null);
+  }, []);
+
   // Filter/Search Handlers
   const handleSearchChange = (e) => {
     setSearchTerm(e.target.value);
@@ -58,43 +69,51 @@ export const useManageListings = () => {
     debouncedResetPage(); // Call memoized debounced function
   };
 
-  useEffect(() => {
-    const fetchListings = async () => {
-      if (!idToken) return;
-      setLoading(true);
-      setFetchError(null);
-      const params = new URLSearchParams({
-        page: page + 1,
-        limit: rowsPerPage,
-        sort: orderBy,
-        order,
-        search: searchTerm,
-      });
-      if (filterPropertyType) params.append("propertyType", filterPropertyType);
-      if (filterListingType) params.append("listingType", filterListingType);
-      if (filterVisibility) params.append("isHidden", filterVisibility);
-      if (filterFeatured) params.append("isFeatured", filterFeatured);
+  // Guards against an older, slower in-flight request resolving AFTER a
+  // newer one and clobbering its result with stale data.
+  const latestRequestIdRef = useRef(0);
 
-      try {
-        const response = await axios.get(
-          `${API_BASE_URL}/admin/listings?${params.toString()}`,
-          { headers: { Authorization: `Bearer ${idToken}` } }
-        );
-        setListings(response.data.listings || []);
-        setTotalListings(response.data.totalListings || 0);
-        setSelected([]);
-      } catch (err) {
-        console.error("Error fetching listings:", err);
-        setFetchError(
-          err.response?.data?.message || "Failed to fetch listings."
-        );
-        setListings([]);
-        setTotalListings(0);
-      } finally {
+  const fetchListings = useCallback(async (pageOverride) => {
+    if (!idToken) return;
+    const requestId = ++latestRequestIdRef.current;
+    setLoading(true);
+    setFetchError(null);
+    const effectivePage = pageOverride !== undefined ? pageOverride : page;
+    const params = new URLSearchParams({
+      page: effectivePage + 1,
+      limit: rowsPerPage,
+      sort: orderBy,
+      order,
+      search: searchTerm,
+      deleted: viewMode === "trash" ? "true" : "false",
+    });
+    if (filterPropertyType) params.append("propertyType", filterPropertyType);
+    if (filterListingType) params.append("listingType", filterListingType);
+    if (filterVisibility) params.append("isHidden", filterVisibility);
+    if (filterFeatured) params.append("isFeatured", filterFeatured);
+
+    try {
+      const response = await axios.get(
+        `${API_BASE_URL}/admin/listings?${params.toString()}`,
+        { headers: { Authorization: `Bearer ${idToken}` } }
+      );
+      if (requestId !== latestRequestIdRef.current) return; // stale response - ignore
+      setListings(response.data.listings || []);
+      setTotalListings(response.data.totalListings || 0);
+      setSelected([]);
+    } catch (err) {
+      if (requestId !== latestRequestIdRef.current) return; // stale error - ignore
+      console.error("Error fetching listings:", err);
+      setFetchError(
+        err.response?.data?.message || "Failed to fetch listings."
+      );
+      setListings([]);
+      setTotalListings(0);
+    } finally {
+      if (requestId === latestRequestIdRef.current) {
         setLoading(false);
       }
-    };
-    fetchListings();
+    }
   }, [
     idToken,
     page,
@@ -106,7 +125,12 @@ export const useManageListings = () => {
     filterListingType,
     filterVisibility,
     filterFeatured,
+    viewMode,
   ]);
+
+  useEffect(() => {
+    fetchListings();
+  }, [fetchListings]);
 
   const handleSelectAllClick = (event) => {
     if (event.target.checked) {
@@ -219,45 +243,133 @@ export const useManageListings = () => {
     [idToken, showSnackbar, setListings, setActionLoading]
   );
 
-  const handleDeleteSelected = () => {
+  // Single-row restore (no confirmation - non-destructive, reversible by
+  // deleting again)
+  const handleRestoreSingle = useCallback(
+    async (id) => {
+      if (!idToken) {
+        showSnackbar("Authentication token missing.", "error");
+        return;
+      }
+      const currentActionKey = `restore-${id}`;
+      setActionLoading((prev) => ({ ...prev, [currentActionKey]: true }));
+      try {
+        await axios.put(
+          `${API_BASE_URL}/admin/listings/${id}/restore`,
+          {},
+          { headers: { Authorization: `Bearer ${idToken}` } }
+        );
+        setListings((prev) => prev.filter((l) => l._id !== id));
+        setTotalListings((prev) => Math.max(0, prev - 1));
+        showSnackbar("Listing restored successfully.", "success");
+      } catch (err) {
+        console.error("Restore error:", err);
+        showSnackbar(
+          err.response?.data?.message || "Failed to restore listing.",
+          "error"
+        );
+      } finally {
+        setActionLoading((prev) => ({ ...prev, [currentActionKey]: false }));
+      }
+    },
+    [idToken, showSnackbar]
+  );
+
+  // --- Confirmation-gated actions: move to bin, permanent delete, empty bin ---
+
+  const handleMoveSelectedToBin = () => {
     if (selected.length === 0 || !idToken) return;
-    setConfirmDialogOpen(true);
+    setConfirmAction({ type: "softDelete", ids: selected, context: "selected" });
   };
 
-  const executeBulkDelete = async () => {
-    setBulkDeleteLoading(true);
-    try {
-      const response = await axios.delete(`${API_BASE_URL}/admin/listings`, {
-        headers: { Authorization: `Bearer ${idToken}` },
-        data: { listingIds: selected },
-      });
-      setListings((prev) => prev.filter((l) => !selected.includes(l._id)));
-      setTotalListings((prev) => prev - response.data.deletedCount);
-      setSelected([]);
-      showSnackbar(
-        `${response.data.deletedCount} listing(s) deleted successfully.`,
-        "success"
-      );
-    } catch (err) {
-      console.error("Error deleting selected listings:", err);
-      showSnackbar(
-        err.response?.data?.message || "Failed to delete selected listings.",
-        "error"
-      );
-    } finally {
-      setBulkDeleteLoading(false);
-      setConfirmDialogOpen(false);
-    }
+  const handlePermanentDeleteSelected = () => {
+    if (selected.length === 0 || !idToken) return;
+    setConfirmAction({
+      type: "permanentDelete",
+      ids: selected,
+      context: "selected",
+    });
+  };
+
+  const handlePermanentDeleteSingle = (id) => {
+    if (!id || !idToken) return;
+    setConfirmAction({
+      type: "permanentDelete",
+      ids: [id],
+      context: "selected",
+    });
+  };
+
+  // Empties the ENTIRE Recycle Bin server-side (every isDeleted:true listing,
+  // across all pages) - no ID list is sent, so this isn't limited to what's
+  // currently loaded on screen.
+  const handleEmptyRecycleBin = () => {
+    if (listings.length === 0 || !idToken) return;
+    setConfirmAction({ type: "emptyBin" });
   };
 
   const closeConfirmDialog = () => {
-    setConfirmDialogOpen(false);
+    setConfirmAction(null);
+  };
+
+  const executeConfirmedAction = async () => {
+    if (!confirmAction) return;
+    setBulkActionLoading(true);
+    try {
+      if (confirmAction.type === "softDelete") {
+        const response = await axios.post(
+          `${API_BASE_URL}/admin/listings/delete-multiple`,
+          { listingIds: confirmAction.ids },
+          { headers: { Authorization: `Bearer ${idToken}` } }
+        );
+        showSnackbar(
+          `${response.data.deletedCount} listing(s) moved to the Recycle Bin.`,
+          "success"
+        );
+        await fetchListings();
+      } else if (confirmAction.type === "permanentDelete") {
+        const response = await axios.post(
+          `${API_BASE_URL}/admin/listings/permanent-delete`,
+          { listingIds: confirmAction.ids },
+          { headers: { Authorization: `Bearer ${idToken}` } }
+        );
+        showSnackbar(
+          `${response.data.deletedCount} listing(s) permanently deleted.`,
+          "success"
+        );
+        await fetchListings();
+      } else if (confirmAction.type === "emptyBin") {
+        const response = await axios.post(
+          `${API_BASE_URL}/admin/listings/empty-recycle-bin`,
+          {},
+          { headers: { Authorization: `Bearer ${idToken}` } }
+        );
+        showSnackbar(
+          `${response.data.deletedCount} listing(s) permanently deleted.`,
+          "success"
+        );
+        setPage(0);
+        await fetchListings(0);
+      }
+      setSelected([]);
+    } catch (err) {
+      console.error("Error performing listing action:", err);
+      showSnackbar(
+        err.response?.data?.message || "Action failed.",
+        "error"
+      );
+    } finally {
+      setBulkActionLoading(false);
+      setConfirmAction(null);
+    }
   };
 
   return {
     listings,
     loading,
     fetchError,
+    viewMode,
+    setViewMode,
     page,
     rowsPerPage,
     totalListings,
@@ -269,9 +381,9 @@ export const useManageListings = () => {
     filterVisibility,
     filterFeatured,
     actionLoading,
-    bulkDeleteLoading,
+    bulkActionLoading,
     selected,
-    confirmDialogOpen,
+    confirmAction,
     isSelected,
     handleSearchChange,
     handleFilterChange,
@@ -282,12 +394,16 @@ export const useManageListings = () => {
     handleChangeRowsPerPage,
     handleVisibilityToggle,
     handleFeatureToggle,
-    handleDeleteSelected,
-    executeBulkDelete,
+    handleRestoreSingle,
+    handleMoveSelectedToBin,
+    handlePermanentDeleteSelected,
+    handlePermanentDeleteSingle,
+    handleEmptyRecycleBin,
+    executeConfirmedAction,
     closeConfirmDialog,
     setFilterPropertyType,
     setFilterListingType,
     setFilterVisibility,
     setFilterFeatured,
   };
-}; // [cite: 1]
+};
