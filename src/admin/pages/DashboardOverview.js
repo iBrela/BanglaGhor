@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import axios from "axios";
+import { useNavigate } from "react-router-dom";
 import {
   Container,
   Grid,
@@ -26,8 +27,24 @@ const API_BASE_URL =
   process.env.REACT_APP_API_URL || "http://localhost:5001/api";
 
 // Helper component for statistic cards
-const StatCard = ({ title, value, icon, color = "primary", loading }) => (
-  <Card elevation={3} sx={{ display: "flex", alignItems: "center", p: 2 }}>
+const StatCard = ({ title, value, icon, color = "primary", loading, onClick }) => (
+  <Card
+    elevation={3}
+    onClick={onClick}
+    sx={{
+      display: "flex",
+      alignItems: "center",
+      p: 2,
+      ...(onClick && {
+        cursor: "pointer",
+        transition: "transform 0.15s ease, box-shadow 0.15s ease",
+        "&:hover": {
+          transform: "translateY(-2px)",
+          boxShadow: 6,
+        },
+      }),
+    }}
+  >
     <Avatar sx={{ bgcolor: `${color}.main`, width: 56, height: 56, mr: 2 }}>
       {icon}
     </Avatar>
@@ -47,6 +64,7 @@ const DashboardOverview = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const { idToken } = useAuth();
+  const navigate = useNavigate();
 
   useEffect(() => {
     const fetchStats = async () => {
@@ -96,6 +114,7 @@ const DashboardOverview = () => {
             icon={<HomeWorkIcon />}
             color="success"
             loading={loading}
+            onClick={() => navigate("/admin/listings")}
           />
         </Grid>
 
@@ -106,6 +125,7 @@ const DashboardOverview = () => {
             icon={<HourglassEmptyIcon />}
             color="warning"
             loading={loading}
+            onClick={() => navigate("/admin/pending-approvals")}
           />
         </Grid>
 
@@ -116,6 +136,7 @@ const DashboardOverview = () => {
             icon={<PersonOutlineIcon />}
             color="info"
             loading={loading}
+            onClick={() => navigate("/admin/users")}
           />
         </Grid>
 
@@ -127,6 +148,7 @@ const DashboardOverview = () => {
             icon={<NewReleasesIcon />}
             color="secondary"
             loading={loading}
+            onClick={() => navigate("/admin/listings")}
           />
         </Grid>
 
@@ -138,6 +160,7 @@ const DashboardOverview = () => {
             icon={<PersonAddAlt1Icon />}
             color="secondary"
             loading={loading}
+            onClick={() => navigate("/admin/users")}
           />
         </Grid>
       </Grid>

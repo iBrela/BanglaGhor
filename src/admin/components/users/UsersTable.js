@@ -16,6 +16,7 @@ import {
   Tooltip,
   Badge,
   Paper,
+  Box,
 } from "@mui/material";
 import BlockIcon from "@mui/icons-material/Block";
 import { format } from "date-fns";
@@ -29,7 +30,7 @@ const headCells = [
     disablePadding: false,
     label: "Registered",
   },
-  { id: "isAdmin", numeric: false, disablePadding: false, label: "Admin?" },
+  { id: "isAdmin", numeric: false, disablePadding: false, label: "Admin Access" },
   {
     id: "accountStatus",
     numeric: false,
@@ -108,7 +109,7 @@ const UsersTable = ({
       <TableContainer sx={{ maxHeight: "calc(100vh - 340px)" }}>
         <Table
           stickyHeader
-          sx={{ minWidth: 900 }}
+          sx={{ minWidth: 1050 }}
           aria-label="manage users table"
         >
           <TableHead>
@@ -234,63 +235,71 @@ const UsersTable = ({
                         sx={{ textTransform: "capitalize" }}
                       />
                     </TableCell>
-                    <TableCell>
-                      <FormControl
-                        size="small"
-                        sx={{ minWidth: 130 }}
-                        disabled={isLoadingAction}
+                    <TableCell sx={{ whiteSpace: "nowrap" }}>
+                      <Box
+                        sx={{
+                          display: "flex",
+                          flexWrap: "nowrap",
+                          alignItems: "center",
+                          gap: 1,
+                        }}
                       >
-                        <Select
-                          value={user.approvalStatus || "not_started"}
-                          onChange={(e) =>
-                            onUserUpdate(
-                              user._id,
-                              "approvalStatus",
-                              e.target.value
-                            )
-                          }
-                          displayEmpty
-                          inputProps={{
-                            "aria-label": "Change approval status",
-                          }}
-                          variant="outlined"
+                        <FormControl
                           size="small"
-                          sx={{ fontSize: "0.875rem" }}
+                          sx={{ minWidth: 130, flexShrink: 0 }}
+                          disabled={isLoadingAction}
                         >
-                          <MenuItem value="not_started">Not Started</MenuItem>
-                          <MenuItem value="pending">Pending</MenuItem>
-                          <MenuItem value="approved">Approved</MenuItem>
-                          <MenuItem value="rejected">Rejected</MenuItem>
-                        </Select>
-                      </FormControl>
-                      <Tooltip
-                        title={
-                          isBlocked ? "Unblock User" : "Block User Account"
-                        }
-                      >
-                        <span>
-                          <Switch
-                            checked={isBlocked}
+                          <Select
+                            value={user.approvalStatus || "not_started"}
                             onChange={(e) =>
                               onUserUpdate(
                                 user._id,
-                                "accountStatus",
-                                e.target.checked ? "blocked" : "active"
+                                "approvalStatus",
+                                e.target.value
                               )
                             }
-                            disabled={isCurrentUser || isLoadingAction}
-                            color="error"
+                            displayEmpty
+                            inputProps={{
+                              "aria-label": "Change approval status",
+                            }}
+                            variant="outlined"
                             size="small"
-                            inputProps={{ "aria-label": "Block/Unblock User" }}
-                          />
-                        </span>
-                      </Tooltip>
-                      {isLoadingAction && (
-                        <CircularProgress
-                          size={20}
-                          sx={{ ml: 1, verticalAlign: "middle" }}
-                        />
-                      )}
+                            sx={{ fontSize: "0.875rem" }}
+                          >
+                            <MenuItem value="not_started">Not Started</MenuItem>
+                            <MenuItem value="pending">Pending</MenuItem>
+                            <MenuItem value="approved">Approved</MenuItem>
+                            <MenuItem value="rejected">Rejected</MenuItem>
+                          </Select>
+                        </FormControl>
+                        <Tooltip
+                          title={
+                            isBlocked ? "Unblock User" : "Block User Account"
+                          }
+                        >
+                          <span>
+                            <Switch
+                              checked={isBlocked}
+                              onChange={(e) =>
+                                onUserUpdate(
+                                  user._id,
+                                  "accountStatus",
+                                  e.target.checked ? "blocked" : "active"
+                                )
+                              }
+                              disabled={isCurrentUser || isLoadingAction}
+                              color="error"
+                              size="small"
+                              inputProps={{
+                                "aria-label": "Block/Unblock User",
+                              }}
+                            />
+                          </span>
+                        </Tooltip>
+                        {isLoadingAction && (
+                          <CircularProgress size={20} sx={{ flexShrink: 0 }} />
+                        )}
+                      </Box>
                     </TableCell>
                   </TableRow>
                 );

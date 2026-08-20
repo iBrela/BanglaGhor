@@ -24,6 +24,7 @@ import PeopleIcon from "@mui/icons-material/People";
 import LogoutIcon from "@mui/icons-material/Logout";
 import ListAltIcon from "@mui/icons-material/ListAlt";
 import DashboardIcon from "@mui/icons-material/Dashboard";
+import HomeIcon from "@mui/icons-material/Home";
 
 const drawerWidth = 240;
 
@@ -99,6 +100,26 @@ const AdminLayout = () => {
         sx={{ borderColor: alpha(theme.palette.primary.contrastText, 0.2) }}
       />
       <List sx={{ mt: "auto" }}>
+        <ListItem disablePadding>
+          <ListItemButton
+            component={RouterLink}
+            to="/"
+            onClick={mobileOpen ? handleDrawerToggle : undefined}
+            sx={{
+              minHeight: 48,
+              justifyContent: "initial",
+              px: 2.5,
+              "& .MuiListItemIcon-root, & .MuiListItemText-root": {
+                color: theme.palette.text.secondary,
+              },
+            }}
+          >
+            <ListItemIcon sx={{ minWidth: 0, mr: 3, color: "inherit" }}>
+              <HomeIcon />
+            </ListItemIcon>
+            <ListItemText primary="Back to Website" sx={{ color: "inherit" }} />
+          </ListItemButton>
+        </ListItem>
         <ListItem disablePadding>
           <ListItemButton
             onClick={handleLogout}

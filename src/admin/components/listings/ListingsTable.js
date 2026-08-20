@@ -1,4 +1,5 @@
 import React from "react";
+import { useNavigate } from "react-router-dom";
 import {
   Table,
   TableBody,
@@ -20,6 +21,7 @@ import VisibilityIcon from "@mui/icons-material/Visibility";
 import VisibilityOffIcon from "@mui/icons-material/VisibilityOff";
 import StarIcon from "@mui/icons-material/Star";
 import StarBorderIcon from "@mui/icons-material/StarBorder";
+import EditIcon from "@mui/icons-material/Edit";
 import { format } from "date-fns";
 import { formatPrice } from "../../../utils/formatPrice";
 
@@ -108,6 +110,8 @@ const ListingsTable = ({
   onFeatureToggle,
   bulkDeleteLoading,
 }) => {
+  const navigate = useNavigate();
+
   const createSortHandler = (property) => (event) => {
     onRequestSort(event, property);
   };
@@ -268,7 +272,21 @@ const ListingsTable = ({
                     </TableCell>
                     <TableCell>{l.createdBy}</TableCell>
                     <TableCell>{formatDate(l.createdAt)}</TableCell>
-                    <TableCell align="center">
+                    <TableCell align="center" sx={{ whiteSpace: "nowrap" }}>
+                      <Tooltip title="Edit Listing">
+                        <span>
+                          <IconButton
+                            size="small"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              navigate(`/edit-property/${l._id}`);
+                            }}
+                            disabled={bulkDeleteLoading}
+                          >
+                            <EditIcon fontSize="small" />
+                          </IconButton>
+                        </span>
+                      </Tooltip>
                       <Tooltip
                         title={l.isHidden ? "Make Visible" : "Hide Listing"}
                       >
