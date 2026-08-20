@@ -1,7 +1,7 @@
 const path = require("path");
 
 require("node:dns").setServers(["8.8.8.8", "1.1.1.1"]);
-require("dotenv").config({ path: "./.env" });
+require("dotenv").config({ path: path.resolve(__dirname, ".env") });
 
 const aiRoutes = require("./routes/aiRoutes");
 const propertyRoutes = require("./routes/propertyRoutes");
@@ -43,7 +43,12 @@ mongoose
   })
   .catch((err) => {
     console.error("❌ Error connecting to MongoDB Atlas:", err);
+    process.exit(1);
   });
+
+mongoose.connection.on("error", (err) => {
+  console.error("❌ MongoDB connection error (post-startup):", err);
+});
 
 // 5) MODELS (Ensure UserProfile is defined in its file)
 const Property = require("./models/property");
@@ -56,7 +61,7 @@ app.get("/", (req, res) => {
 });
 
 // // 7) Start Server
-const PORT = 5001;
+const PORT = process.env.PORT || 5001;
 
 app.listen(PORT, () => {
   console.log(`Server listening on port ${PORT}`);

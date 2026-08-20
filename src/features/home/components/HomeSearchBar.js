@@ -25,7 +25,8 @@ import Fuse from "fuse.js";
 import MapComponent from "../../map/components/MapComponent";
 import PropertyCardSuggestion from "./PropertyCardSuggestion";
  
-const API_BASE_URL = "http://localhost:5001/api";
+const API_BASE_URL =
+  process.env.REACT_APP_API_URL || "http://localhost:5001/api";
  
 const HomeSearchBar = () => {
   const navigate = useNavigate();
