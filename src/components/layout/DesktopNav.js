@@ -4,7 +4,7 @@ import { Link as RouterLink, useNavigate } from "react-router-dom";
 import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
 import { styled } from "@mui/material/styles";
 import { useTranslation } from "react-i18next";
-
+ 
 const StyledButton = styled(Button)(({ theme, variant }) => ({
   //
   borderRadius: "8px",
@@ -15,7 +15,7 @@ const StyledButton = styled(Button)(({ theme, variant }) => ({
   boxShadow:
     variant === "contained" ? "0 4px 14px rgba(43, 123, 140, 0.25)" : "none",
   transition: "all 0.3s ease",
-  fontSize: "0.9rem", 
+  fontSize: "0.9rem",
   ...(variant === "contained" && {
     //
     backgroundColor: theme.palette.primary.main,
@@ -28,29 +28,29 @@ const StyledButton = styled(Button)(({ theme, variant }) => ({
     },
   }),
 }));
-
+ 
 const DesktopNav = ({
   
-  navLinks, 
-  activeLink, 
-  handleNavigate, 
+  navLinks,
+  activeLink,
+  handleNavigate,
   onListPropertyClick,
 }) => {
-  const navigate = useNavigate(); 
-  const { t } = useTranslation(); 
-  const [anchorElProperties, setAnchorElProperties] = useState(null); 
-  const openProperties = Boolean(anchorElProperties); 
-
+  const navigate = useNavigate();
+  const { t } = useTranslation();
+  const [anchorElProperties, setAnchorElProperties] = useState(null);
+  const openProperties = Boolean(anchorElProperties);
+ 
   const handleClickProperties = (
-    event 
-  ) => setAnchorElProperties(event.currentTarget); 
+    event
+  ) => setAnchorElProperties(event.currentTarget);
   const handleCloseProperties = () => setAnchorElProperties(null);
   const handlePropertyLink = (mode) => {
     //
-    navigate(`/properties/${mode}`); 
-    handleCloseProperties(); 
+    navigate(`/properties/${mode}`);
+    handleCloseProperties();
   };
-
+ 
   return (
     <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
       {" "}
@@ -58,35 +58,35 @@ const DesktopNav = ({
         (
           link
         ) =>
-          link.id === "properties" ? ( 
+          link.id === "properties" ? (
             <Box key={link.id}>
               {" "}
               <Button //
                 id="properties-button"
-                aria-controls={openProperties ? "properties-menu" : undefined} 
-                aria-haspopup="true" 
-                aria-expanded={openProperties ? "true" : undefined} 
-                onClick={handleClickProperties} 
-                endIcon={<KeyboardArrowDownIcon />} 
+                aria-controls={openProperties ? "properties-menu" : undefined}
+                aria-haspopup="true"
+                aria-expanded={openProperties ? "true" : undefined}
+                onClick={handleClickProperties}
+                endIcon={<KeyboardArrowDownIcon />}
                 sx={{
-                  color: "text.primary", 
-                  textTransform: "none", 
-                  fontWeight: activeLink === link.id ? 600 : 500, 
-                  fontSize: "0.95rem", 
-                  borderRadius: "8px", 
-                  px: 1.5, 
-                  "&:hover": { bgcolor: "action.hover" }, 
+                  color: "text.primary",
+                  textTransform: "none",
+                  fontWeight: activeLink === link.id ? 600 : 500,
+                  fontSize: "0.95rem",
+                  borderRadius: "8px",
+                  px: 1.5,
+                  "&:hover": { bgcolor: "action.hover" },
                 }}
               >
                 {link.label}
               </Button>
               <Menu //
-                id="properties-menu" 
-                anchorEl={anchorElProperties} 
-                open={openProperties} 
-                onClose={handleCloseProperties} 
-                MenuListProps={{ "aria-labelledby": "properties-button" }} 
-                PaperProps={{ elevation: 3, sx: { borderRadius: 2 } }} 
+                id="properties-menu"
+                anchorEl={anchorElProperties}
+                open={openProperties}
+                onClose={handleCloseProperties}
+                MenuListProps={{ "aria-labelledby": "properties-button" }}
+                PaperProps={{ elevation: 3, sx: { borderRadius: 2 } }}
               >
                 <MenuItem
                   onClick={() => handlePropertyLink("buy")}
@@ -112,34 +112,35 @@ const DesktopNav = ({
               </Menu>
             </Box>
           ) : (
-            <Button 
-              key={link.id} 
+            <Button
+              key={link.id}
               onClick={() => handleNavigate(link.path)}
               sx={{
                 
-                color: "text.primary", 
-                textTransform: "none", 
-                fontWeight: activeLink === link.id ? 600 : 500, 
-                fontSize: "0.95rem", 
-                borderRadius: "8px", 
-                px: 1.5, 
-                "&:hover": { bgcolor: "action.hover" }, 
+                color: "text.primary",
+                textTransform: "none",
+                fontWeight: activeLink === link.id ? 600 : 500,
+                fontSize: "0.95rem",
+                borderRadius: "8px",
+                px: 1.5,
+                "&:hover": { bgcolor: "action.hover" },
               }}
             >
               {link.label}
             </Button>
           )
       )}
-      <StyledButton 
-        variant="contained" 
-        color="primary" 
-        onClick={onListPropertyClick} 
-        sx={{ ml: 1 }} 
+      <StyledButton
+        variant="contained"
+        color="primary"
+        onClick={onListPropertyClick}
+        sx={{ ml: 1 }}
       >
         {t("list_property")}
       </StyledButton>
     </Box>
   );
 };
-
+ 
 export default DesktopNav;
+ 

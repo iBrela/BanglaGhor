@@ -19,7 +19,7 @@ import {
   Divider,
 } from "@mui/material";
 import NotificationsIcon from "@mui/icons-material/Notifications";
-import { styled, alpha } from "@mui/material/styles";
+import { styled, alpha, useTheme } from "@mui/material/styles";
 import MenuIcon from "@mui/icons-material/Menu";
 import { useAuth } from "../../context/AuthContext";
 import { useChatContext } from "../../features/chat/context/ChatContext";
@@ -29,6 +29,7 @@ import DesktopNav from "./DesktopNav";
 import MobileDrawer from "./MobileDrawer";
 import ProfileMenu from "./ProfileMenu";
 import LanguageToggle from "../common/LanguageToggle";
+import ThemeToggle from "../common/ThemeToggle";
 import HomeIcon from "@mui/icons-material/Home";
 import InfoIcon from "@mui/icons-material/Info";
 import ContactsIcon from "@mui/icons-material/Contacts";
@@ -36,8 +37,8 @@ import HomeWorkIcon from "@mui/icons-material/HomeWork";
 import { useTranslation } from "react-i18next";
 import UploadIdModal from "../../features/profile/components/UploadIdModal";
 import Logo from '../../pictures/logo.png';
-
-
+ 
+ 
 function HideOnScroll(props) {
   const { children } = props;
   const trigger = useScrollTrigger();
@@ -47,24 +48,25 @@ function HideOnScroll(props) {
     </Slide>
   );
 }
-
+ 
 const NavbarContainer = styled(AppBar)(({ theme }) => ({
-  backgroundColor: alpha(theme.palette.background.paper, 0.9), //
+  backgroundColor: alpha(theme.palette.background.paper, 0.9),
   backdropFilter: "blur(10px)",
   boxShadow: "inset 0px -1px 1px #E5E5E5",
   color: theme.palette.text.primary,
 }));
-
+ 
 const Navbar = () => {
   const { isLoggedIn, user, logout, idToken } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const { t } = useTranslation();
+  const theme = useTheme();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [activeLink, setActiveLink] = useState("home");
   const [logoutSnackbar, setLogoutSnackbar] = useState(false);
   const [uploadIdModalOpen, setUploadIdModalOpen] = useState(false);
-
+ 
   const {
     totalUnreadMessages,
     unreadCounts,
@@ -73,10 +75,10 @@ const Navbar = () => {
     detailedUnreadConversations,
     updateDetailedUnreadConversations,
   } = useChatContext();
-
+ 
   const [notificationAnchorEl, setNotificationAnchorEl] = useState(null);
   const [isFetchingMenuDetails, setIsFetchingMenuDetails] = useState(false);
-
+ 
   const navLinks = [
     { id: "home", label: t("nav_home"), path: "/", icon: <HomeIcon /> },
     {
@@ -93,7 +95,7 @@ const Navbar = () => {
       icon: <ContactsIcon />,
     },
   ];
-
+ 
   useEffect(() => {
     const currentPath = location.pathname;
     if (currentPath === "/") setActiveLink("home");
@@ -103,11 +105,11 @@ const Navbar = () => {
     else if (currentPath.startsWith("/list-property")) setActiveLink("");
     else setActiveLink("");
   }, [location.pathname]);
-
+ 
   const handleDrawerToggle = () => setMobileOpen(!mobileOpen);
   const handleOpenUploadModal = () => setUploadIdModalOpen(true);
   const handleCloseUploadModal = () => setUploadIdModalOpen(false);
-
+ 
   const handleNavigate = (path) => {
     if (path === "/list-property") {
       handleListPropertyClick();
@@ -115,7 +117,7 @@ const Navbar = () => {
       navigate(path);
     }
   };
-
+ 
   const handleListPropertyClick = () => {
     if (!user) {
       navigate("/login");
@@ -137,18 +139,18 @@ const Navbar = () => {
         break;
     }
   };
-
+ 
   const handleLogout = () => {
     logout();
     setLogoutSnackbar(true);
     navigate("/");
   };
-
+ 
   const handleCloseLogoutSnackbar = (event, reason) => {
     if (reason === "clickaway") return;
     setLogoutSnackbar(false);
   };
-
+ 
   const handleNotificationIconClick = async (event) => {
     setNotificationAnchorEl(event.currentTarget);
     if (
@@ -170,21 +172,20 @@ const Navbar = () => {
         setIsFetchingMenuDetails(false);
       }
     } else if (Object.keys(unreadCounts).length === 0) {
-      // If there are no unread counts, clear detailed list
       updateDetailedUnreadConversations([], {}, user?._id || "");
     }
   };
-
+ 
   const handleNotificationMenuClose = () => {
     setNotificationAnchorEl(null);
   };
-
+ 
   const handleNotificationItemClick = (conversationId) => {
     selectConversation({ _id: conversationId });
     navigate(`/chat/${conversationId}`);
     handleNotificationMenuClose();
   };
-
+ 
   return (
     <>
       <HideOnScroll>
@@ -200,6 +201,7 @@ const Navbar = () => {
                     height: { xs: 30, sm: 35, md: 40 },
                     marginRight: '10px',
                     objectFit: 'contain',
+                    filter: theme.palette.mode === 'dark' ? 'brightness(0) invert(1)' : 'none',
                   }}
                 />
                 <Typography
@@ -207,7 +209,7 @@ const Navbar = () => {
                   noWrap
                   sx={{
                     fontWeight: 700,
-                    color: "black",
+                    color: "text.primary",
                     textDecoration: "none",
                     cursor: "pointer",
                     display: { xs: "none", sm: "block" },
@@ -216,7 +218,7 @@ const Navbar = () => {
                   BanglaGhor
                 </Typography>
               </RouterLink>
-
+ 
               {/* Desktop Navigation Area */}
               <Box
                 sx={{
@@ -247,6 +249,7 @@ const Navbar = () => {
                     </Badge>
                   </IconButton>
                 )}
+                <ThemeToggle />
                 <LanguageToggle />
                 {isLoggedIn ? (
                   <ProfileMenu handleLogout={handleLogout} />
@@ -266,6 +269,7 @@ const Navbar = () => {
                   </Button>
                 )}
               </Box>
+ 
               {/* Mobile Navigation Area */}
               <Box
                 sx={{
@@ -289,6 +293,7 @@ const Navbar = () => {
                     </Badge>
                   </IconButton>
                 )}
+                <ThemeToggle />
                 <LanguageToggle />
                 {isLoggedIn ? (
                   <ProfileMenu handleLogout={handleLogout} />
@@ -322,7 +327,7 @@ const Navbar = () => {
           </Container>
         </NavbarContainer>
       </HideOnScroll>
-
+ 
       {/* Notification Dropdown Menu */}
       <Menu
         id="notifications-menu"
@@ -411,7 +416,7 @@ const Navbar = () => {
             </MenuItem>
           ))}
       </Menu>
-
+ 
       <MobileDrawer
         mobileOpen={mobileOpen}
         handleDrawerToggle={handleDrawerToggle}
@@ -442,5 +447,5 @@ const Navbar = () => {
     </>
   );
 };
-
+ 
 export default Navbar;

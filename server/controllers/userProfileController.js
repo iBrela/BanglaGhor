@@ -3,14 +3,37 @@ const path = require("path");
 const Property = require("../models/property.js");
 const { S3Client, PutObjectCommand } = require("@aws-sdk/client-s3");
 
+// ============================================================================
+// S3 Client Setup (AWS by default, LocalStack when USE_LOCALSTACK=true)
+// ============================================================================
 const s3Client = new S3Client({
   region: process.env.APP_AWS_REGION,
   credentials: {
     accessKeyId: process.env.APP_AWS_ACCESS_KEY_ID,
     secretAccessKey: process.env.APP_AWS_SECRET_ACCESS_KEY,
   },
+  // LocalStack overrides (only active when USE_LOCALSTACK=true)
+  ...(process.env.USE_LOCALSTACK === "true" && {
+    endpoint: process.env.LOCALSTACK_ENDPOINT || "http://localhost:4566",
+    forcePathStyle: true,
+    credentials: {
+      accessKeyId: "test",
+      secretAccessKey: "test",
+    },
+  }),
 });
 const S3_BUCKET = process.env.S3_BUCKET_NAME;
+
+// ============================================================================
+// Helper: Build S3 object URL (AWS or LocalStack format)
+// ============================================================================
+function buildS3ObjectUrl(bucket, key) {
+  if (process.env.USE_LOCALSTACK === "true") {
+    const endpoint = process.env.LOCALSTACK_ENDPOINT || "http://localhost:4566";
+    return `${endpoint}/${bucket}/${key}`;
+  }
+  return `https://${bucket}.s3.${process.env.APP_AWS_REGION}.amazonaws.com/${key}`;
+}
 
 exports.getMyProfile = async (req, res) => {
   if (!req.user || !req.user.email || !req.user.sub) {
@@ -158,20 +181,17 @@ exports.uploadGovtId = async (req, res) => {
   try {
     const command = new PutObjectCommand(params);
     const uploadResult = await s3Client.send(command);
-    console.log("S3 Upload Result:", uploadResult); // Log the result from S3
+    console.log("S3 Upload Result:", uploadResult);
 
-    // Construct the S3 URL (adjust based on your bucket/region/settings)
-    // Basic HTTPS URL format:
-    const fileUrl = `https://${S3_BUCKET}.s3.${process.env.APP_AWS_REGION}.amazonaws.com/${s3Key}`;
+    // Build URL based on storage backend (AWS or LocalStack)
+    const fileUrl = buildS3ObjectUrl(S3_BUCKET, s3Key);
     console.log(`File uploaded successfully to: ${fileUrl}`);
 
-    // Find user profile
     const userProfile = await UserProfile.findOne({ email: userEmail });
     if (!userProfile) {
       console.error(
         `ID Upload Error: UserProfile not found for ${userEmail} after S3 upload.`
       );
-      // Note: Consider deleting the S3 object here if the profile doesn't exist, though unlikely
       return res.status(404).json({ message: "User profile not found." });
     }
     userProfile.govtIdUrl = fileUrl;
@@ -213,8 +233,7 @@ exports.getMyListings = async (req, res) => {
           queryIdentifier
         )}. Cannot fetch listings.`
       );
-      // If a user is authenticated but somehow has no profile record, they can't have listings.
-      return res.status(200).json([]); // Return empty array, not an error
+      return res.status(200).json([]);
     }
     const userListings = await Property.find({ createdBy: userProfile._id })
       .sort({ createdAt: -1 })

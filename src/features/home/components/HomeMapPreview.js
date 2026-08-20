@@ -8,41 +8,34 @@ import {
   CircularProgress,
   Alert,
 } from "@mui/material";
+import { useTheme, alpha } from "@mui/material/styles";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import axios from "axios"; 
+import axios from "axios";
 import MapComponent from "../../map/components/MapComponent";
-
+ 
 const API_BASE_URL =
   process.env.REACT_APP_API_URL || "http://localhost:5001/api";
-
-/**
- * HomeMapPreview Component
- *
- * Displays a preview of the map on the home page, now with fetched properties.
- */
+ 
 const HomeMapPreview = () => {
   const navigate = useNavigate();
   const { t } = useTranslation();
-
+  const theme = useTheme();
+  const isDark = theme.palette.mode === "dark";
+ 
   const [properties, setProperties] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-
+ 
   useEffect(() => {
     const fetchPreviewProperties = async () => {
       setLoading(true);
       setError(null);
       try {
-        // Fetch a small number of properties for the preview
-        // For example, fetch 10 available featured properties or just recent ones
         const response = await axios.get(`${API_BASE_URL}/properties`, {
-          params: {
-            limit: 10, 
-            featured: true, 
-          },
+          params: { limit: 10, featured: true },
         });
-
+ 
         const mappableProperties = (response.data || [])
           .map((prop) => {
             const property = prop.toObject ? prop.toObject() : prop;
@@ -55,57 +48,77 @@ const HomeMapPreview = () => {
             return property;
           })
           .filter((p) => p.position && p.position.lat && p.position.lng);
-
+ 
         setProperties(mappableProperties);
       } catch (err) {
         console.error("Error fetching preview properties:", err);
         setError(
-          t(
-            "map_preview_load_error",
-            "Could not load properties for map preview."
-          )
+          t("map_preview_load_error", "Could not load properties for map preview.")
         );
       } finally {
         setLoading(false);
       }
     };
-
+ 
     fetchPreviewProperties();
-  }, [t]); 
-
+  }, [t]);
+ 
   return (
-    <Box sx={{ py: 6, backgroundColor: "#f8f9fa" }}>
+    <Box
+      sx={{
+        py: 8,
+        background: isDark
+          ? `linear-gradient(180deg, ${theme.palette.background.default} 0%, ${theme.palette.background.paper} 100%)`
+          : `linear-gradient(180deg, ${theme.palette.background.default} 0%, ${alpha(theme.palette.primary.main, 0.04)} 100%)`,
+        position: "relative",
+        overflow: "hidden",
+        "&::before": {
+          content: '""',
+          position: "absolute",
+          top: 0,
+          left: "50%",
+          transform: "translateX(-50%)",
+          width: "600px",
+          height: "1px",
+          background: `linear-gradient(90deg, transparent, ${alpha(theme.palette.primary.main, 0.3)}, transparent)`,
+        },
+      }}
+    >
       <Container maxWidth="lg">
         <Typography
           variant="h4"
           component="h2"
-          fontWeight={600}
+          fontWeight={700}
           gutterBottom
           align="center"
+          sx={{ color: "text.primary" }}
         >
           {t("explore_on_map_title", "Explore Properties on Map")}
         </Typography>
         <Typography
           variant="body1"
-          color="text.secondary"
           align="center"
-          sx={{ mb: 4 }}
+          sx={{ mb: 4, color: "text.secondary" }}
         >
           {t(
             "explore_on_map_subtitle",
             "Find properties visually in your desired locations across Bangladesh."
           )}
         </Typography>
+ 
         <Paper
-          elevation={3}
+          elevation={0}
           sx={{
             height: { xs: "300px", sm: "400px", md: "500px" },
             width: "100%",
-            borderRadius: "12px",
+            borderRadius: "16px",
             overflow: "hidden",
-            boxShadow: "0 8px 24px rgba(0,0,0,0.1)",
-            mb: 3,
-            position: "relative", 
+            border: `1px solid ${alpha(theme.palette.primary.main, 0.2)}`,
+            boxShadow: isDark
+              ? `0 0 40px ${alpha(theme.palette.primary.main, 0.08)}, 0 8px 32px rgba(0,0,0,0.4)`
+              : `0 4px 24px ${alpha(theme.palette.primary.main, 0.1)}`,
+            mb: 4,
+            position: "relative",
           }}
         >
           {loading ? (
@@ -115,10 +128,11 @@ const HomeMapPreview = () => {
                 justifyContent: "center",
                 alignItems: "center",
                 height: "100%",
+                backgroundColor: "background.paper",
               }}
             >
-              <CircularProgress />
-              <Typography sx={{ ml: 2 }}>
+              <CircularProgress color="primary" />
+              <Typography sx={{ ml: 2, color: "text.secondary" }}>
                 {t("loading_map_preview", "Loading Map...")}
               </Typography>
             </Box>
@@ -130,6 +144,7 @@ const HomeMapPreview = () => {
                 alignItems: "center",
                 height: "100%",
                 p: 2,
+                backgroundColor: "background.paper",
               }}
             >
               <Alert severity="error" sx={{ width: "100%" }}>
@@ -139,17 +154,18 @@ const HomeMapPreview = () => {
           ) : (
             <MapComponent
               properties={properties}
-              mapCenter={[23.8103, 90.4125]} // Default center for Bangladesh
-              mapZoom={7} // Default zoom for a country overview
+              mapCenter={[23.8103, 90.4125]}
+              mapZoom={7}
             />
           )}
         </Paper>
+ 
         <Box sx={{ textAlign: "center" }}>
           <Button
             variant="contained"
             color="primary"
             onClick={() => navigate("/map")}
-            sx={{ borderRadius: "8px", textTransform: "none", px: 3, py: 1 }}
+            sx={{ borderRadius: "10px", textTransform: "none", px: 4, py: 1.2 }}
           >
             {t("open_full_map", "Open Full Map")}
           </Button>
@@ -158,5 +174,5 @@ const HomeMapPreview = () => {
     </Box>
   );
 };
-
+ 
 export default HomeMapPreview;

@@ -24,6 +24,19 @@ const propertySchema = new mongoose.Schema(
       lng: { type: Number },
     },
 
+    // GeoJSON location for MongoDB geospatial queries (used by smart chatbot)
+    geoLocation: {
+      type: {
+        type: String,
+        enum: ["Point"],
+        default: "Point",
+      },
+      coordinates: {
+        type: [Number], // [longitude, latitude] - GeoJSON format
+        default: undefined,
+      },
+    },
+
     // Location accuracy flag
     locationAccuracy: {
       type: String,
@@ -49,10 +62,10 @@ const propertySchema = new mongoose.Schema(
 
     listingStatus: {
       type: String,
-      enum: ["available", "rented", "sold", "unavailable"], // Added "unavailable" for general cases
+      enum: ["available", "rented", "sold", "unavailable"],
       default: "available",
       required: true,
-      index: true, // Add index if you plan to query by this field often
+      index: true,
     },
 
     // Basic Details
@@ -145,12 +158,10 @@ const propertySchema = new mongoose.Schema(
     // Ownership & Timestamps
     createdBy: {
       type: Schema.Types.ObjectId,
-      ref: "UserProfile", // This links it to your UserProfile model
+      ref: "UserProfile",
       required: true,
-      index: true, // Good for performance if you query properties by user
-    }, // Keep as String (stores user email)
-    // Consider adding ref to User model if you have one:
-    // createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+      index: true,
+    },
   },
   { timestamps: true }
 );
@@ -191,6 +202,12 @@ propertySchema.pre("save", function (next) {
       if (!this.position) this.position = {};
       this.position.lat = this.latitude;
       this.position.lng = this.longitude;
+
+      // Also sync geoLocation for geospatial queries
+      this.geoLocation = {
+        type: "Point",
+        coordinates: [this.longitude, this.latitude], // [lng, lat] for GeoJSON
+      };
     }
   }
 
@@ -203,14 +220,23 @@ propertySchema.pre("save", function (next) {
     ) {
       this.latitude = this.position.lat;
       this.longitude = this.position.lng;
+
+      // Also sync geoLocation
+      this.geoLocation = {
+        type: "Point",
+        coordinates: [this.position.lng, this.position.lat],
+      };
     }
   }
 
   next();
 });
 
-// Add index for faster geospatial queries
+// Add index for faster geospatial queries (legacy)
 propertySchema.index({ latitude: 1, longitude: 1 });
+
+// 2dsphere index for proper geo queries (allows "find within radius" queries)
+propertySchema.index({ geoLocation: "2dsphere" });
 
 // Add index on fields commonly used for searching/filtering
 propertySchema.index({

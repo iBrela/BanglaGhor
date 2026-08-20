@@ -5,14 +5,53 @@ const Property = require("../models/property");
 const mongoose = require("mongoose");
 const { subDays } = require("date-fns");
 
+// ============================================================================
+// S3 Client Setup (AWS by default, LocalStack when USE_LOCALSTACK=true)
+// ============================================================================
 const s3Client = new S3Client({
   region: process.env.APP_AWS_REGION,
   credentials: {
     accessKeyId: process.env.APP_AWS_ACCESS_KEY_ID,
     secretAccessKey: process.env.APP_AWS_SECRET_ACCESS_KEY,
   },
+  // LocalStack overrides (only active when USE_LOCALSTACK=true)
+  ...(process.env.USE_LOCALSTACK === "true" && {
+    endpoint: process.env.LOCALSTACK_ENDPOINT || "http://localhost:4566",
+    forcePathStyle: true,
+    credentials: {
+      accessKeyId: "test",
+      secretAccessKey: "test",
+    },
+  }),
 });
 const S3_BUCKET = process.env.S3_BUCKET_NAME;
+
+// ============================================================================
+// Helper: Extract S3 key from URL (handles both AWS and LocalStack formats)
+// ============================================================================
+// AWS format:        https://bucket.s3.region.amazonaws.com/key/path/file
+// LocalStack format: http://localhost:4566/bucket/key/path/file
+// ============================================================================
+function extractS3KeyFromUrl(url) {
+  if (!url) return null;
+  try {
+    const urlObj = new URL(url);
+    // LocalStack path-style URL
+    if (urlObj.hostname === "localhost" || urlObj.hostname === "127.0.0.1") {
+      const pathParts = urlObj.pathname.split("/").filter(Boolean);
+      pathParts.shift(); // Remove bucket name (first segment)
+      return decodeURIComponent(pathParts.join("/"));
+    }
+    // AWS virtual-hosted-style URL
+    if (urlObj.hostname.endsWith("amazonaws.com")) {
+      return decodeURIComponent(urlObj.pathname.substring(1));
+    }
+    return null;
+  } catch (e) {
+    console.error("Failed to parse S3 URL:", url, e.message);
+    return null;
+  }
+}
 
 exports.getDashboardStats = async (req, res) => {
   try {
@@ -59,13 +98,12 @@ exports.viewUserGovtId = async (req, res) => {
         .status(404)
         .json({ message: "Government ID not uploaded for this user." });
     }
-    // Extract the S3 Key from the stored URL
-    const urlParts = userProfile.govtIdUrl.split(".amazonaws.com/");
-    if (urlParts.length < 2 || !urlParts[1]) {
+    // Extract the S3 Key from the stored URL (handles AWS + LocalStack)
+    const s3Key = extractS3KeyFromUrl(userProfile.govtIdUrl);
+    if (!s3Key) {
       console.error(`Could not parse S3 key from URL: ${userProfile.govtIdUrl}`);
       return res.status(500).send("Error processing file location.");
     }
-    const s3Key = decodeURIComponent(urlParts[1]);
     const command = new GetObjectCommand({
       Bucket: S3_BUCKET,
       Key: s3Key,
@@ -111,14 +149,13 @@ exports.getSignedIdUrlForAdmin = async (req, res) => {
         .status(404)
         .json({ message: "Government ID not found for this user." });
     }
-    const urlParts = userProfile.govtIdUrl.split(".amazonaws.com/");
-    if (urlParts.length < 2 || !urlParts[1]) {
+    const s3Key = extractS3KeyFromUrl(userProfile.govtIdUrl);
+    if (!s3Key) {
       console.error(`Could not parse S3 key from URL: ${userProfile.govtIdUrl}`);
       return res
         .status(500)
         .json({ message: "Error processing file location." });
     }
-    const s3Key = decodeURIComponent(urlParts[1]);
     const command = new GetObjectCommand({ Bucket: S3_BUCKET, Key: s3Key });
     const signedUrl = await getSignedUrl(s3Client, command, { expiresIn: 300 });
     res.status(200).json({ signedUrl: signedUrl });
@@ -444,7 +481,6 @@ exports.featureListing = async (req, res) => {
       return res.status(404).json({ message: "Property listing not found." });
     }
     if (feature) {
-      // Enforce feature limit
       if (property.featuredAt !== null) {
         console.log(`Listing ${listingId} is already featured.`);
         return res.status(200).json({

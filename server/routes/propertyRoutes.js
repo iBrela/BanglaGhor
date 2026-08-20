@@ -4,7 +4,7 @@ const router = express.Router();
 const propertyController = require("../controllers/propertyController");
 const authMiddleware = require("../middleware/authMiddleware");
 const fetchUserProfileMiddleware = require("../middleware/fetchUserProfileMiddleware");
-const checkListingApprovalMiddleware = require("../middleware/checkListingApprovalMiddleware.js"); // You fixed this import
+const checkListingApprovalMiddleware = require("../middleware/checkListingApprovalMiddleware.js"); 
 const {
   handleValidationErrors,
 } = require("../middleware/ValidationMiddleware");

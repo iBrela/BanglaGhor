@@ -1,5 +1,5 @@
 import React, { useMemo } from "react";
-import { Marker, Popup, useMap } from "react-leaflet"; 
+import { Marker, Popup } from "react-leaflet"; 
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import PlaceIcon from "@mui/icons-material/Place"; 
@@ -37,12 +37,8 @@ const createLeafletIcon = (property, isSelected) => {
 
 
 const MapMarker = ({ property, isSelected, onClick }) => {
-  const map = useMap(); // Get map instance for flyTo
-
-  
   const position = property?.position;
 
-  
   const icon = useMemo(() => {
     return createLeafletIcon(property, isSelected);
   }, [property, isSelected]);
@@ -63,13 +59,8 @@ const MapMarker = ({ property, isSelected, onClick }) => {
 
   const handleMarkerClick = () => {
     if (onClick) {
-      onClick(property); 
+      onClick(property);
     }
-    
-    map.flyTo([position.lat, position.lng], Math.max(map.getZoom(), 15), {
-      animate: true,
-      duration: 0.8,
-    });
   };
 
   return (

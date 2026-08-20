@@ -29,12 +29,13 @@ import AdminRoutes from "./admin/AdminRoutes";
 import AdminProtectedRoute from "./components/common/AdminProtectedRoute";
 import ChatPage from "./features/chat/ChatPage";
 import EditPropertyPage from "./pages/EditPropertyPage";
-import { theme } from "./styles/theme";
-import { ThemeProvider } from "@mui/material/styles";
-import CssBaseline from "@mui/material/CssBaseline";
+import { AppThemeProvider } from "./context/ThemeContext";
 import { AuthProvider } from "./context/AuthContext";
 import { SnackbarProvider } from "./context/SnackbarContext";
 import { ChatProvider } from "./features/chat/context/ChatContext";
+
+// AI Chatbot (BanglaGhor AI - smart property search assistant)
+import AIChatbot from "./features/chat/components/ai_chatbot";
 
 // Global Axios Configuration
 axios.defaults.baseURL = process.env.REACT_APP_API_URL || '/api';
@@ -101,8 +102,7 @@ const BlankLayout = () => (
 
 function App() {
   return (
-    <ThemeProvider theme={theme}>
-      <CssBaseline />
+    <AppThemeProvider>
       <AuthProvider>
         <SnackbarProvider>
           <ChatProvider>
@@ -156,11 +156,14 @@ function App() {
                   />
                 </Route>
               </Routes>
+
+              {/* AI Chatbot - floating button visible on all pages */}
+              <AIChatbot />
             </Router>
           </ChatProvider>
         </SnackbarProvider>
       </AuthProvider>
-    </ThemeProvider>
+    </AppThemeProvider>
   );
 }
 

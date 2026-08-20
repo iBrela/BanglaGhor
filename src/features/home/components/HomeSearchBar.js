@@ -10,27 +10,26 @@ import {
   DialogContent,
   DialogTitle,
   IconButton,
+  Tooltip,
 } from "@mui/material";
 import { alpha } from "@mui/material/styles";
 import SearchIcon from "@mui/icons-material/Search";
 import LocationOnIcon from "@mui/icons-material/LocationOn";
 import CloseIcon from "@mui/icons-material/Close";
+import MicIcon from "@mui/icons-material/Mic";
+import MicOffIcon from "@mui/icons-material/MicOff";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import axios from "axios";
 import Fuse from "fuse.js";
 import MapComponent from "../../map/components/MapComponent";
 import PropertyCardSuggestion from "./PropertyCardSuggestion";
-
+ 
 const API_BASE_URL = "http://localhost:5001/api";
-
-/**
- * HomeSearchBar Component
- * Displays the main search bar, suggestions, and map dialog for location selection.
- */
+ 
 const HomeSearchBar = () => {
   const navigate = useNavigate();
-  const { t } = useTranslation(); 
+  const { t } = useTranslation();
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedLocation, setSelectedLocation] = useState(() =>
     t("search_location")
@@ -40,12 +39,58 @@ const HomeSearchBar = () => {
   const [allProperties, setAllProperties] = useState([]);
   const [loadingSuggestions, setLoadingSuggestions] = useState(false);
   const [mapOpen, setMapOpen] = useState(false);
+ 
+  // ── Speech to text state ──────────────────────────────────────────────────
+  const [isListening, setIsListening] = useState(false);
+  const [speechSupported, setSpeechSupported] = useState(false);
+  const recognitionRef = useRef(null);
+  // ─────────────────────────────────────────────────────────────────────────
+ 
   const searchContainerRef = useRef(null);
-
+ 
   useEffect(() => {
     setSelectedLocation(t("search_location"));
   }, [t]);
-
+ 
+  // ── Check browser speech support ─────────────────────────────────────────
+  useEffect(() => {
+    const SpeechRecognition =
+      window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (SpeechRecognition) {
+      setSpeechSupported(true);
+      const recognition = new SpeechRecognition();
+      recognition.continuous = false;
+      recognition.interimResults = true;
+      recognition.lang = "en-US";
+ 
+      recognition.onresult = (event) => {
+        const transcript = Array.from(event.results)
+          .map((result) => result[0].transcript)
+          .join("");
+        setSearchQuery(transcript);
+ 
+        // Run fuzzy search on the spoken text
+        if (transcript.length > 1 && fuse) {
+          const results = fuse.search(transcript);
+          setFilteredProperties(results.map((r) => r.item).slice(0, 5));
+          setShowSuggestions(true);
+        }
+      };
+ 
+      recognition.onend = () => {
+        setIsListening(false);
+      };
+ 
+      recognition.onerror = (event) => {
+        console.error("Speech recognition error:", event.error);
+        setIsListening(false);
+      };
+ 
+      recognitionRef.current = recognition;
+    }
+  }, []);
+  // ─────────────────────────────────────────────────────────────────────────
+ 
   useEffect(() => {
     const fetchAllProperties = async () => {
       try {
@@ -59,7 +104,7 @@ const HomeSearchBar = () => {
     };
     fetchAllProperties();
   }, []);
-
+ 
   const fuse = useMemo(() => {
     if (!allProperties || allProperties.length === 0) return null;
     return new Fuse(allProperties, {
@@ -68,12 +113,27 @@ const HomeSearchBar = () => {
       threshold: 0.4,
     });
   }, [allProperties]);
-
+ 
+  // ── Toggle mic ────────────────────────────────────────────────────────────
+  const handleMicToggle = () => {
+    if (!recognitionRef.current) return;
+    if (isListening) {
+      recognitionRef.current.stop();
+      setIsListening(false);
+    } else {
+      setSearchQuery("");
+      setShowSuggestions(false);
+      recognitionRef.current.start();
+      setIsListening(true);
+    }
+  };
+  // ─────────────────────────────────────────────────────────────────────────
+ 
   const handleSearchInputChange = (e) => {
     const query = e.target.value;
     setSearchQuery(query);
     setLoadingSuggestions(true);
-
+ 
     if (query.length > 1 && fuse) {
       const results = fuse.search(query);
       setFilteredProperties(results.map((result) => result.item).slice(0, 5));
@@ -84,28 +144,28 @@ const HomeSearchBar = () => {
     }
     setLoadingSuggestions(false);
   };
-
+ 
   const handlePropertySelect = (property) => {
     const mode = property.mode || "rent";
     navigate(`/properties/${mode}`);
     setShowSuggestions(false);
     setSearchQuery("");
   };
-
+ 
   const handleSearch = () => {
     const queryParams = new URLSearchParams();
     if (searchQuery) queryParams.set("search", searchQuery);
     navigate(`/properties/rent?${queryParams.toString()}`);
     setShowSuggestions(false);
   };
-
+ 
   const handleOpenMap = () => setMapOpen(true);
   const handleCloseMap = () => setMapOpen(false);
   const handleLocationSelected = (locationName) => {
     setSelectedLocation(locationName || t("search_location"));
     handleCloseMap();
   };
-
+ 
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (
@@ -120,7 +180,7 @@ const HomeSearchBar = () => {
       document.removeEventListener("mousedown", handleClickOutside);
     };
   }, [searchContainerRef]);
-
+ 
   return (
     <>
       <Paper
@@ -153,7 +213,11 @@ const HomeSearchBar = () => {
           <TextField
             fullWidth
             variant="outlined"
-            placeholder={t("search_placeholder")} 
+            placeholder={
+              isListening
+                ? "🎤 Listening..."
+                : t("search_placeholder")
+            }
             value={searchQuery}
             onChange={handleSearchInputChange}
             onFocus={() => setShowSuggestions(searchQuery.length > 1)}
@@ -163,9 +227,51 @@ const HomeSearchBar = () => {
                   <SearchIcon color="action" />
                 </InputAdornment>
               ),
-              sx: { borderRadius: "8px", bgcolor: alpha("#EFF9FE", 0.5) },
+              // ── Mic button inside the search field ──────────────────────
+              endAdornment: speechSupported ? (
+                <InputAdornment position="end">
+                  <Tooltip title={isListening ? "Stop listening" : "Search by voice"}>
+                    <IconButton
+                      onClick={handleMicToggle}
+                      size="small"
+                      sx={{
+                        color: isListening ? "#FF5F40" : "#7BAFC0",
+                        backgroundColor: isListening
+                          ? alpha("#FF5F40", 0.12)
+                          : "transparent",
+                        animation: isListening
+                          ? "pulse 1.2s infinite"
+                          : "none",
+                        "@keyframes pulse": {
+                          "0%": { boxShadow: "0 0 0 0 rgba(255,95,64,0.4)" },
+                          "70%": { boxShadow: "0 0 0 8px rgba(255,95,64,0)" },
+                          "100%": { boxShadow: "0 0 0 0 rgba(255,95,64,0)" },
+                        },
+                        "&:hover": {
+                          backgroundColor: isListening
+                            ? alpha("#FF5F40", 0.2)
+                            : alpha("#00D4E8", 0.1),
+                          color: isListening ? "#FF5F40" : "#00D4E8",
+                        },
+                      }}
+                    >
+                      {isListening ? <MicOffIcon /> : <MicIcon />}
+                    </IconButton>
+                  </Tooltip>
+                </InputAdornment>
+              ) : null,
+              // ─────────────────────────────────────────────────────────────
+              sx: {
+                borderRadius: "8px",
+                bgcolor: alpha("#EFF9FE", 0.5),
+                // cyan outline when listening
+                ...(isListening && {
+                  "& fieldset": { borderColor: "#FF5F40 !important" },
+                }),
+              },
             }}
           />
+ 
           {showSuggestions && (
             <Paper
               elevation={6}
@@ -184,7 +290,7 @@ const HomeSearchBar = () => {
             >
               {loadingSuggestions && (
                 <Typography sx={{ p: 2, color: "text.secondary" }}>
-                  {t("sending")} 
+                  {t("sending")}
                 </Typography>
               )}
               {!loadingSuggestions && filteredProperties.length > 0 ? (
@@ -208,7 +314,7 @@ const HomeSearchBar = () => {
                       onClick={handleSearch}
                       sx={{ textTransform: "none" }}
                     >
-                      View all results 
+                      View all results
                     </Button>
                   </Box>
                 </>
@@ -216,18 +322,18 @@ const HomeSearchBar = () => {
                 !loadingSuggestions &&
                 searchQuery.length > 1 && (
                   <Typography sx={{ p: 2, color: "text.secondary" }}>
-                    No specific matches found. 
+                    No specific matches found.
                   </Typography>
                 )
               )}
             </Paper>
           )}
         </Box>
-
+ 
         <TextField
           variant="outlined"
           fullWidth
-          value={selectedLocation} 
+          value={selectedLocation}
           onClick={handleOpenMap}
           InputProps={{
             startAdornment: (
@@ -244,7 +350,7 @@ const HomeSearchBar = () => {
           }}
           sx={{ flex: { xs: "1 1 100%", md: 1 } }}
         />
-
+ 
         <Button
           variant="contained"
           color="primary"
@@ -264,10 +370,10 @@ const HomeSearchBar = () => {
             },
           }}
         >
-          {t("search_button")} 
+          {t("search_button")}
         </Button>
       </Paper>
-
+ 
       <Dialog
         open={mapOpen}
         onClose={handleCloseMap}
@@ -285,7 +391,7 @@ const HomeSearchBar = () => {
             p: 2,
           }}
         >
-          Select Location 
+          Select Location
           <IconButton onClick={handleCloseMap} sx={{ color: "white" }}>
             <CloseIcon />
           </IconButton>
@@ -302,5 +408,6 @@ const HomeSearchBar = () => {
     </>
   );
 };
-
+ 
 export default HomeSearchBar;
+ 

@@ -4,19 +4,40 @@ const axios = require("axios");
 const { S3Client, PutObjectCommand } = require("@aws-sdk/client-s3");
 const { v4: uuidv4 } = require("uuid");
 
-
+// ============================================================================
+// S3 Client Setup (AWS by default, LocalStack when USE_LOCALSTACK=true)
+// ============================================================================
 const propertyImagesS3Client = new S3Client({
-  region: process.env.APP_AWS_REGION, // Assuming region is the same for both buckets
+  region: process.env.APP_AWS_REGION,
   credentials: {
     accessKeyId: process.env.PROPERTY_IMAGES_ACCESS_KEY,
     secretAccessKey: process.env.PROPERTY_IMAGES_SECRET_KEY,
   },
+  // LocalStack overrides (only active when USE_LOCALSTACK=true)
+  ...(process.env.USE_LOCALSTACK === "true" && {
+    endpoint: process.env.LOCALSTACK_ENDPOINT || "http://localhost:4566",
+    forcePathStyle: true,
+    credentials: {
+      accessKeyId: "test",
+      secretAccessKey: "test",
+    },
+  }),
 });
 const S3_PROPERTY_IMAGES_BUCKET = process.env.APP_S3_BUCKET_PROPERTY_IMAGES;
 const S3_PROPERTY_IMAGES_FOLDER = "property-images/";
 
+// ============================================================================
+// Helper: Build S3 object URL (AWS or LocalStack format)
+// ============================================================================
+function buildS3ObjectUrl(bucket, key) {
+  if (process.env.USE_LOCALSTACK === "true") {
+    const endpoint = process.env.LOCALSTACK_ENDPOINT || "http://localhost:4566";
+    return `${endpoint}/${bucket}/${key}`;
+  }
+  return `https://${bucket}.s3.${process.env.APP_AWS_REGION}.amazonaws.com/${key}`;
+}
+
 const isValidBangladeshLocation = (lat, lng) => {
-  // Rough bounding box for Bangladesh
   const BD_BOUNDS = {
     minLat: 20.5,
     maxLat: 26.7,
@@ -32,35 +53,20 @@ const isValidBangladeshLocation = (lat, lng) => {
   );
 };
 
-// Helper function to get fallback coordinates for districts
-
 const getDistrictCoordinates = (district) => {
   const districtMap = {
-    // Central districts
     Dhaka: { lat: 23.8103, lng: 90.4125 },
     Gazipur: { lat: 24.0958, lng: 90.4125 },
     Narayanganj: { lat: 23.6238, lng: 90.5 },
-
-    // Chittagong Division
     Chattogram: { lat: 22.3569, lng: 91.7832 },
     "Cox's Bazar": { lat: 21.4272, lng: 92.0101 },
-
-    // Sylhet Division
     Sylhet: { lat: 24.8949, lng: 91.8687 },
     Moulvibazar: { lat: 24.4843, lng: 91.7774 },
-
-    // Rajshahi Division
     Rajshahi: { lat: 24.3745, lng: 88.6042 },
     Bogura: { lat: 24.8465, lng: 89.3729 },
-
-    // Khulna Division
     Khulna: { lat: 22.8456, lng: 89.5403 },
     Jessore: { lat: 23.1681, lng: 89.2134 },
-
-    // Barisal Division
     Barisal: { lat: 22.701, lng: 90.3535 },
-
-    // Rangpur Division
     Rangpur: { lat: 25.7439, lng: 89.2752 },
   };
 
@@ -81,11 +87,8 @@ const getDistrictCoordinates = (district) => {
     }
   }
 
-  // Default to Dhaka if no match found
   return districtMap["Dhaka"];
 };
-
-// Helper to construct a well-formatted address for geocoding
 
 const constructGeocodingAddress = (addressData) => {
   const {
@@ -97,7 +100,6 @@ const constructGeocodingAddress = (addressData) => {
     postalCode,
   } = addressData;
 
-  // Create a properly structured address for optimal geocoding results
   let addressComponents = [];
   if (addressLine1) addressComponents.push(addressLine1);
   if (addressLine2) addressComponents.push(addressLine2);
@@ -109,8 +111,6 @@ const constructGeocodingAddress = (addressData) => {
 
   return addressComponents.join(", ");
 };
-
-// Function to geocode an address using OpenCage API
 
 const geocodeAddress = async (addressData) => {
   const fullAddress = constructGeocodingAddress(addressData);
@@ -135,10 +135,8 @@ const geocodeAddress = async (addressData) => {
       const result = geoRes.data.results[0];
       const location = result.geometry;
 
-      // Determine location accuracy
       let locationAccuracy = "approximate";
 
-      // OpenCage provides a confidence score (0-10)
       if (result.confidence >= 8) {
         locationAccuracy = "precise";
       } else if (result.confidence >= 5) {
@@ -147,13 +145,11 @@ const geocodeAddress = async (addressData) => {
         locationAccuracy = "district-level";
       }
 
-      // Check if coordinates are within Bangladesh
       if (!isValidBangladeshLocation(location.lat, location.lng)) {
         console.warn(
           `Geocoding returned coordinates outside Bangladesh: ${location.lat}, ${location.lng}`
         );
 
-        // Use district-based fallback coordinates
         const districtCoordinates = getDistrictCoordinates(
           addressData.district
         );
@@ -181,7 +177,6 @@ const geocodeAddress = async (addressData) => {
     } else {
       console.warn(`No geocoding results for address: ${fullAddress}`);
 
-      // Use district-based fallback
       const districtCoordinates = getDistrictCoordinates(addressData.district);
       if (districtCoordinates) {
         return {
@@ -222,13 +217,13 @@ exports.createProperty = async (req, res) => {
       postalCode: req.body.postalCode,
     };
 
-    const geocodeResult = await geocodeAddress(addressData); //
+    const geocodeResult = await geocodeAddress(addressData);
 
     let propertyData = {
       ...req.body,
-      createdBy: req.userProfile._id, //
-      listingStatus: req.body.listingStatus || "available", //
-      images: req.body.images || [], //
+      createdBy: req.userProfile._id,
+      listingStatus: req.body.listingStatus || "available",
+      images: req.body.images || [],
     };
 
     if (geocodeResult) {
@@ -236,8 +231,8 @@ exports.createProperty = async (req, res) => {
         ...propertyData,
         latitude: geocodeResult.latitude,
         longitude: geocodeResult.longitude,
-        position: geocodeResult.position, //
-        locationAccuracy: geocodeResult.locationAccuracy, //
+        position: geocodeResult.position,
+        locationAccuracy: geocodeResult.locationAccuracy,
         geocodedAddress: geocodeResult.geocodedAddress,
       };
       console.log(
@@ -247,7 +242,7 @@ exports.createProperty = async (req, res) => {
       console.warn(
         `Geocoding failed completely for address. Using district fallback or general default.`
       );
-      const districtCoordinates = getDistrictCoordinates(addressData.district); //
+      const districtCoordinates = getDistrictCoordinates(addressData.district);
       if (districtCoordinates) {
         propertyData.latitude = districtCoordinates.lat;
         propertyData.longitude = districtCoordinates.lng;
@@ -255,21 +250,21 @@ exports.createProperty = async (req, res) => {
           lat: districtCoordinates.lat,
           lng: districtCoordinates.lng,
         };
-        propertyData.locationAccuracy = "district-level"; //
+        propertyData.locationAccuracy = "district-level";
       } else {
-        const defaultMapCenter = { lat: 23.8103, lng: 90.4125 }; // Dhaka
+        const defaultMapCenter = { lat: 23.8103, lng: 90.4125 };
         propertyData.latitude = defaultMapCenter.lat;
         propertyData.longitude = defaultMapCenter.lng;
         propertyData.position = {
           lat: defaultMapCenter.lat,
           lng: defaultMapCenter.lng,
         };
-        propertyData.locationAccuracy = "unknown"; //
+        propertyData.locationAccuracy = "unknown";
       }
     }
 
     const newProperty = new Property(propertyData);
-    await newProperty.save(); // This will also trigger the pre('save') hook in property.js
+    await newProperty.save();
     const populatedProperty = await Property.findById(newProperty._id).populate(
       "createdBy",
       "_id displayName email cognitoSub profilePictureUrl"
@@ -311,7 +306,7 @@ exports.getAllProperties = async (req, res) => {
     let query;
 
     const userFieldsToPopulate =
-      "_id displayName email cognitoSub profilePictureUrl"; // Ensure displayName
+      "_id displayName email cognitoSub profilePictureUrl";
 
     if (isRandom && limit > 0) {
       properties = await Property.aggregate([
@@ -353,7 +348,7 @@ exports.getAllProperties = async (req, res) => {
         const lng = parseFloat(req.query.nearLng);
         const radius = parseInt(req.query.radius, 10) / 111.12;
 
-        queryFilters.$and = queryFilters.$and || []; // Initialize $and if not present
+        queryFilters.$and = queryFilters.$and || [];
         queryFilters.$and.push(
           { latitude: { $gte: lat - radius, $lte: lat + radius } },
           { longitude: { $gte: lng - radius, $lte: lng + radius } }
@@ -390,16 +385,14 @@ exports.getAllProperties = async (req, res) => {
   }
 };
 
-// Get Property by ID with position handling
 exports.getPropertyById = async (req, res) => {
   try {
-    // For now, let's assume fetching by direct ID should show it, regardless of status, but still respect 'isHidden'.
     const property = await Property.findOne({
       _id: req.params.id,
       isHidden: { $ne: true },
     }).populate(
       "createdBy",
-      "_id displayName email cognitoSub profilePictureUrl" // Ensure displayName
+      "_id displayName email cognitoSub profilePictureUrl"
     );
 
     if (!property) {
@@ -428,7 +421,6 @@ exports.getPropertyById = async (req, res) => {
   }
 };
 
-// Update Property with geocoding if address changed
 exports.updateProperty = async (req, res) => {
   try {
     const propertyId = req.params.id;
@@ -458,18 +450,18 @@ exports.updateProperty = async (req, res) => {
     ];
     const addressFieldsUpdated = addressFields.some(
       (field) => field in req.body
-    ); //
+    );
 
     let updatedFields = { ...req.body };
 
     if (addressFieldsUpdated) {
       const addressDataForUpdate = {
-        addressLine1: req.body.addressLine1 || existingProperty.addressLine1, //
-        addressLine2: req.body.addressLine2 || existingProperty.addressLine2, //
-        cityTown: req.body.cityTown || existingProperty.cityTown, //
-        upazila: req.body.upazila || existingProperty.upazila, //
-        district: req.body.district || existingProperty.district, //
-        postalCode: req.body.postalCode || existingProperty.postalCode, //
+        addressLine1: req.body.addressLine1 || existingProperty.addressLine1,
+        addressLine2: req.body.addressLine2 || existingProperty.addressLine2,
+        cityTown: req.body.cityTown || existingProperty.cityTown,
+        upazila: req.body.upazila || existingProperty.upazila,
+        district: req.body.district || existingProperty.district,
+        postalCode: req.body.postalCode || existingProperty.postalCode,
       };
 
       console.log(
@@ -477,13 +469,13 @@ exports.updateProperty = async (req, res) => {
         addressDataForUpdate
       );
       try {
-        const geocodeResult = await geocodeAddress(addressDataForUpdate); //
+        const geocodeResult = await geocodeAddress(addressDataForUpdate);
         if (geocodeResult) {
           updatedFields.latitude = geocodeResult.latitude;
           updatedFields.longitude = geocodeResult.longitude;
           updatedFields.position = geocodeResult.position;
           updatedFields.locationAccuracy = geocodeResult.locationAccuracy;
-          updatedFields.geocodedAddress = geocodeResult.geocodedAddress; //
+          updatedFields.geocodedAddress = geocodeResult.geocodedAddress;
           console.log(
             `Geocoded updated address to: ${geocodeResult.latitude}, ${geocodeResult.longitude} (accuracy: ${geocodeResult.locationAccuracy})`
           );
@@ -534,7 +526,6 @@ exports.updateProperty = async (req, res) => {
   }
 };
 
-// Delete Property (remains largely the same, but ensure authorization)
 exports.deleteProperty = async (req, res) => {
   try {
     const propertyId = req.params.id;
@@ -544,7 +535,6 @@ exports.deleteProperty = async (req, res) => {
       return res.status(404).json({ error: "Property not found" });
     }
 
-    // Authorization check
     if (
       propertyToDelete.createdBy.toString() !==
         req.userProfile._id.toString() &&
@@ -557,7 +547,6 @@ exports.deleteProperty = async (req, res) => {
 
     const deletedProperty = await Property.findByIdAndDelete(propertyId);
     if (!deletedProperty) {
-      
       return res
         .status(404)
         .json({ error: "Property not found, may have been deleted already." });
@@ -572,13 +561,11 @@ exports.deleteProperty = async (req, res) => {
   }
 };
 
-// ... (updatePropertyCoordinates function remains the same, but add authorization if needed)
 exports.updatePropertyCoordinates = async (req, res) => {
   try {
     const { id } = req.params;
     const { latitude, longitude } = req.body;
 
-    // Validate inputs
     if (!id || !mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({ error: "Invalid property ID" });
     }
@@ -589,7 +576,6 @@ exports.updatePropertyCoordinates = async (req, res) => {
         .json({ error: "Latitude and longitude must be numbers" });
     }
 
-    // Check if coordinates are within Bangladesh
     if (!isValidBangladeshLocation(latitude, longitude)) {
       return res.status(400).json({
         error: "Coordinates are outside Bangladesh",
@@ -597,12 +583,10 @@ exports.updatePropertyCoordinates = async (req, res) => {
       });
     }
 
-    // Authorization check (optional, depends on who can manually update coordinates)
     const propertyToUpdate = await Property.findById(id);
     if (!propertyToUpdate) {
       return res.status(404).json({ error: "Property not found" });
     }
-    // Example: Only owner or admin can update coordinates
     if (
       propertyToUpdate.createdBy.toString() !==
         req.userProfile._id.toString() &&
@@ -614,15 +598,14 @@ exports.updatePropertyCoordinates = async (req, res) => {
       });
     }
 
-    // Update the property with new coordinates
     const updatedProperty = await Property.findByIdAndUpdate(
       id,
       {
         latitude,
         longitude,
         position: { lat: latitude, lng: longitude },
-        locationAccuracy: "precise", 
-        manuallyUpdated: true, 
+        locationAccuracy: "precise",
+        manuallyUpdated: true,
       },
       { new: true, runValidators: true }
     );
@@ -667,20 +650,18 @@ exports.uploadPropertyImageToS3 = async (req, res) => {
       Key: fileName,
       Body: file.buffer,
       ContentType: file.mimetype,
-      ACL: "public-read", 
-      
+      ACL: "public-read",
     };
 
-    
     await propertyImagesS3Client.send(new PutObjectCommand(uploadParams));
 
-    const imageUrl = `https://${S3_PROPERTY_IMAGES_BUCKET}.s3.${process.env.APP_AWS_REGION}.amazonaws.com/${fileName}`;
+    // Build URL based on storage backend (AWS or LocalStack)
+    const imageUrl = buildS3ObjectUrl(S3_PROPERTY_IMAGES_BUCKET, fileName);
     res
       .status(200)
       .json({ message: "Image uploaded successfully", imageUrl: imageUrl });
   } catch (error) {
     console.error("Error uploading property image to S3:", error);
-    
     if (error.name === "CredentialsError" || error.name === "AccessDenied") {
       console.error(
         "AWS Credentials or Permissions issue for Property Images S3 Client."
@@ -690,19 +671,15 @@ exports.uploadPropertyImageToS3 = async (req, res) => {
   }
 };
 
- 
-
 exports.batchGeocodeProperties = async (req, res) => {
-  
   if (!req.userProfile || !req.userProfile.isAdmin) {
-    
     return res
       .status(403)
       .json({ error: "Admin privileges required for batch geocoding." });
   }
 
   try {
-    const { limit = 10 } = req.query; // Default limit to 10
+    const { limit = 10 } = req.query;
     const parsedLimit = parseInt(limit, 10);
 
     if (isNaN(parsedLimit) || parsedLimit <= 0) {
@@ -711,16 +688,14 @@ exports.batchGeocodeProperties = async (req, res) => {
       });
     }
 
-    
     const properties = await Property.find({
       $or: [
         { latitude: { $exists: false } },
         { longitude: { $exists: false } },
         { position: { $exists: false } },
-        { locationAccuracy: "unknown" }, 
+        { locationAccuracy: "unknown" },
       ],
-      
-    }).limit(parsedLimit); 
+    }).limit(parsedLimit);
 
     console.log(
       `Found ${properties.length} properties to geocode (limit: ${parsedLimit})`
@@ -750,15 +725,12 @@ exports.batchGeocodeProperties = async (req, res) => {
       };
 
       try {
-        
-        await new Promise((resolve) => setTimeout(resolve, 1100)); 
+        await new Promise((resolve) => setTimeout(resolve, 1100));
         const geocodeResult = await geocodeAddress(addressData);
 
         if (geocodeResult) {
-          
           await Property.findByIdAndUpdate(property._id, {
             ...geocodeResult,
-            
           });
 
           results.successfulGeocodes++;
@@ -778,7 +750,6 @@ exports.batchGeocodeProperties = async (req, res) => {
               "Geocoding returned no results for the constructed address.",
             addressAttempted: constructGeocodingAddress(addressData),
           });
-          
         }
       } catch (error) {
         results.failedGeocodes++;

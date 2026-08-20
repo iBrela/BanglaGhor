@@ -1,14 +1,35 @@
-const fetch = require("node-fetch");
+// ============================================================================
+// AI CONTROLLER - Main Entry Point for AI Features
+// ============================================================================
+// Handles two AI-powered endpoints:
+//
+//   1. POST /api/ai/generate-description
+//      → AI-generated property descriptions (NVIDIA + Google Translate)
+//      → Used by listing form
+//
+//   2. POST /api/ai/chatbot
+//      → Smart conversational property search (RAG architecture)
+//      → Used by AIChatbot.js on the frontend
+//      → Orchestrates: intentService → ragService → response
+// ============================================================================
+
 const axios = require("axios");
 
-// Load API keys from environment variables
+// ─── Services ─────────────────────────────────────────────────────────────
+const intentService = require("../services/intentService");
+const ragService = require("../services/ragService");
+
+// ─── Environment Variables ────────────────────────────────────────────────
 const NVIDIA_API_KEY = process.env.NVIDIA_API_KEY;
 const NVIDIA_API_URL = "https://integrate.api.nvidia.com/v1/chat/completions";
 const GOOGLE_TRANSLATE_API_KEY = process.env.GOOGLE_TRANSLATE_API_KEY;
 const GOOGLE_TRANSLATE_URL =
   "https://translation.googleapis.com/language/translate/v2";
 
-// Helper function to safely access nested properties
+// ============================================================================
+// SECTION 1: HELPER FUNCTIONS (for property description generation)
+// ============================================================================
+
 const getSafe = (obj, path, defaultValue = "N/A") => {
   const keys = path.split(".");
   let result = obj;
@@ -16,16 +37,14 @@ const getSafe = (obj, path, defaultValue = "N/A") => {
     if (result && typeof result === "object" && key in result) {
       result = result[key];
     } else {
-      return defaultValue; // Return default if path is invalid or value is null/undefined
+      return defaultValue;
     }
   }
-  // Handle cases where the final value might be null/undefined/empty string
   return result !== null && result !== undefined && result !== ""
     ? result
     : defaultValue;
 };
 
-// Helper function to format features for the prompt
 const formatFeaturesForPrompt = (features = {}) => {
   let featureString = "";
   if (features.parking === true) featureString += "- Parking Available\n";
@@ -38,7 +57,6 @@ const formatFeaturesForPrompt = (features = {}) => {
   return featureString || "N/A";
 };
 
-// Helper function to format Bangladesh-specific details for the prompt
 const formatBangladeshDetailsForPrompt = (bdDetails = {}) => {
   let detailString = "";
   if (getSafe(bdDetails, "propertyCondition") !== "N/A")
@@ -71,21 +89,11 @@ const formatBangladeshDetailsForPrompt = (bdDetails = {}) => {
   )
     detailString += `- Security: ${bdDetails.securityFeatures.join(", ")}\n`;
   if (getSafe(bdDetails, "nearbySchools") !== "N/A")
-    detailString += `- Nearby Schools: ${getSafe(
-      bdDetails,
-      "nearbySchools"
-    )}\n`;
+    detailString += `- Nearby Schools: ${getSafe(bdDetails, "nearbySchools")}\n`;
   if (getSafe(bdDetails, "nearbyHospitals") !== "N/A")
-    detailString += `- Nearby Hospitals: ${getSafe(
-      bdDetails,
-      "nearbyHospitals"
-    )}\n`;
+    detailString += `- Nearby Hospitals: ${getSafe(bdDetails, "nearbyHospitals")}\n`;
   if (getSafe(bdDetails, "nearbyMarkets") !== "N/A")
-    detailString += `- Nearby Markets: ${getSafe(
-      bdDetails,
-      "nearbyMarkets"
-    )}\n`;
-  // Add other important details from bdDetails here...
+    detailString += `- Nearby Markets: ${getSafe(bdDetails, "nearbyMarkets")}\n`;
   if (getSafe(bdDetails, "balcony") === "yes")
     detailString += `- Balcony Available\n`;
   if (getSafe(bdDetails, "rooftopAccess") === "yes")
@@ -94,9 +102,15 @@ const formatBangladeshDetailsForPrompt = (bdDetails = {}) => {
     detailString += `- Natural Light: ${getSafe(bdDetails, "naturalLight")}\n`;
   if (getSafe(bdDetails, "roadWidth") !== "N/A")
     detailString += `- Road Width: ${getSafe(bdDetails, "roadWidth")}\n`;
-
-  return detailString || "N/A"; // Return N/A if no specific details provided
+  return detailString || "N/A";
 };
+
+// ============================================================================
+// SECTION 2: PROPERTY DESCRIPTION GENERATOR (NVIDIA)
+// ============================================================================
+// Used by the listing form to auto-generate property descriptions.
+// This is UNCHANGED from the original implementation.
+// ============================================================================
 
 const generatePropertyDescription = async (req, res) => {
   try {
@@ -111,11 +125,8 @@ const generatePropertyDescription = async (req, res) => {
       return res.status(400).json({ error: "Invalid property data received" });
     }
 
-    // Check if NVIDIA_API_KEY is loaded
     if (!NVIDIA_API_KEY) {
-      console.error(
-        "NVIDIA_API_KEY is not defined. Make sure it's in your .env file and dotenv is configured."
-      );
+      console.error("NVIDIA_API_KEY is not defined.");
       return res
         .status(500)
         .json({ error: "Server configuration error: NVIDIA_API_KEY missing." });
@@ -125,7 +136,7 @@ const generatePropertyDescription = async (req, res) => {
     const location = propertyDataFromRequest.location || {};
     const features = propertyDataFromRequest.features || {};
     const bdDetails = propertyDataFromRequest.bangladeshDetails || {};
-    const userPromptText = propertyDataFromRequest.userPrompt || ""; // Get the user's prompt
+    const userPromptText = propertyDataFromRequest.userPrompt || "";
 
     let prompt = `You are an expert real estate copywriter with deep understanding of the Bangladeshi property market, local culture, and what appeals to buyers and renters in different segments. Write a warm, emotionally engaging, and highly appealing property description for the listing below.
 
@@ -141,7 +152,6 @@ const generatePropertyDescription = async (req, res) => {
 - give response in simple txt format, no markdown or code block
 - (IMPORTANT) PLEASE GIVE ME THE RESPONSE IN ENGLISH LANGUAGE. DO NOT TRANSLATE. DO NOT USE BANGLA. ONLY ENGLISH.
 - avoid using like in the heart of dhaka or in the heart of dhaka city, instead use like in dhaka city or in dhaka or anything more specific.
-- can you analyse the the location of the property in whatever part of the city it lies and generate a description accoringly avoiding key phrases like in the heart of dhaka or in the heart of dhaka city, instead use like in dhaka city or in dhaka or anything like that.
 `;
 
     if (userPromptText) {
@@ -180,8 +190,6 @@ ${formatFeaturesForPrompt(features)}
 **Local Highlights & Context:**
 ${formatBangladeshDetailsForPrompt(bdDetails)}`;
 
-    console.log("---- Sending Prompt to NVIDIA ----\n", prompt);
-
     const payload = {
       model: "mistralai/mistral-medium-3-instruct",
       messages: [{ role: "user", content: prompt }],
@@ -196,6 +204,7 @@ ${formatBangladeshDetailsForPrompt(bdDetails)}`;
       "Content-Type": "application/json",
     };
     const response = await axios.post(NVIDIA_API_URL, payload, { headers });
+
     if (
       response.data &&
       response.data.choices &&
@@ -204,7 +213,6 @@ ${formatBangladeshDetailsForPrompt(bdDetails)}`;
       response.data.choices[0].message.content
     ) {
       let description = response.data.choices[0].message.content.trim();
-      // Normalize language code for Bangla
       let normalizedLanguage = language;
       if (
         ["bangla", "bengali", "bn-BD", "bd", "bangladesh"].includes(
@@ -213,19 +221,9 @@ ${formatBangladeshDetailsForPrompt(bdDetails)}`;
       ) {
         normalizedLanguage = "bn";
       }
-      console.log(
-        "[AIController] Requested language:",
-        language,
-        "| Normalized:",
-        normalizedLanguage
-      );
-      // If language is not English, translate using Google Translate API
       if (normalizedLanguage !== "en") {
-        // Check if GOOGLE_TRANSLATE_API_KEY is available before attempting translation
         if (!GOOGLE_TRANSLATE_API_KEY) {
-          console.warn(
-            "GOOGLE_TRANSLATE_API_KEY is not defined. Skipping translation."
-          );
+          console.warn("GOOGLE_TRANSLATE_API_KEY is not defined. Skipping translation.");
         } else {
           try {
             const qs = require("querystring");
@@ -243,10 +241,6 @@ ${formatBangladeshDetailsForPrompt(bdDetails)}`;
                 },
               }
             );
-            console.log(
-              "[AIController] Google Translate response:",
-              translateRes.data
-            );
             if (
               translateRes.data &&
               translateRes.data.data &&
@@ -257,34 +251,19 @@ ${formatBangladeshDetailsForPrompt(bdDetails)}`;
                 translateRes.data.data.translations[0].translatedText;
             }
           } catch (translateErr) {
-            console.error(
-              "Translation error:",
-              translateErr?.response?.data ||
-                translateErr?.message ||
-                translateErr
-            );
-            // Fallback: return English if translation fails
+            console.error("Translation error:", translateErr?.message);
           }
         }
       }
       res.json({ description });
     } else {
-      console.error(
-        "Invalid response structure from NVIDIA API:",
-        response.data
-      );
       res.status(500).json({
         error: "Failed to generate property description",
         details: "Invalid response structure from NVIDIA API",
-        nvidiaRaw: response.data,
       });
     }
   } catch (error) {
-    console.error(
-      "AI Description Error:",
-      error?.response?.data || error?.message || error,
-      JSON.stringify(error, null, 2)
-    );
+    console.error("AI Description Error:", error?.message);
     res.status(500).json({
       error: "Failed to generate property description",
       details: error?.message || "Unknown AI service error",
@@ -292,4 +271,122 @@ ${formatBangladeshDetailsForPrompt(bdDetails)}`;
   }
 };
 
+// ============================================================================
+// SECTION 3: SMART CHATBOT (RAG-Powered)
+// ============================================================================
+// This is the main chatbot endpoint. It:
+//   1. Validates the incoming request
+//   2. Extracts intent from the user message (intentService)
+//   3. Runs the RAG pipeline to find + generate response (ragService)
+//   4. Returns a structured response to the frontend
+// ============================================================================
+
+const chatbot = async (req, res) => {
+  const startTime = Date.now();
+
+  try {
+    // ─── STEP 1: Extract & validate inputs ──────────────────────────────
+    const { message, conversationHistory, language: requestedLanguage } = req.body;
+
+    if (!message || typeof message !== "string" || !message.trim()) {
+      return res.status(400).json({
+        success: false,
+        error: "Message is required",
+        reply: "Please type a message to get started.",
+        properties: [],
+      });
+    }
+
+    const userMessage = message.trim();
+    const history = Array.isArray(conversationHistory) ? conversationHistory : [];
+
+    console.log("\n[Chatbot] ════════════════════════════════════════");
+    console.log(`[Chatbot] Incoming message: "${userMessage}"`);
+    console.log(`[Chatbot] History length: ${history.length}`);
+    console.log(`[Chatbot] Requested language: ${requestedLanguage || "auto"}`);
+
+    // ─── STEP 2: Extract intent using AI ────────────────────────────────
+    const intent = await intentService.extractIntent(userMessage, history);
+
+    // Override language if frontend explicitly requested one
+    if (requestedLanguage && ["en", "bn", "banglish"].includes(requestedLanguage)) {
+      intent.language = requestedLanguage;
+    }
+
+    // ─── STEP 3: Run RAG pipeline ───────────────────────────────────────
+    const ragResult = await ragService.runRAG({
+      userMessage,
+      intent,
+    });
+
+    // ─── STEP 4: Build response payload ─────────────────────────────────
+    const duration = Date.now() - startTime;
+    console.log(`[Chatbot] Completed in ${duration}ms`);
+    console.log("[Chatbot] ════════════════════════════════════════\n");
+
+    return res.json({
+      success: true,
+      reply: ragResult.reply,
+      properties: ragResult.properties || [],
+      metadata: {
+        intent: ragResult.metadata.intent,
+        searchTier: ragResult.metadata.searchTier,
+        geocodedLocation: ragResult.metadata.geocodedLocation,
+        propertyCount: ragResult.metadata.propertyCount,
+        language: ragResult.metadata.language,
+        responseTimeMs: duration,
+      },
+    });
+  } catch (error) {
+    console.error("[Chatbot] Error:", error);
+    const duration = Date.now() - startTime;
+
+    return res.status(500).json({
+      success: false,
+      error: "Chatbot processing failed",
+      reply:
+        "Sorry, something went wrong. Please try again in a moment.",
+      properties: [],
+      metadata: {
+        responseTimeMs: duration,
+      },
+    });
+  }
+};
+
+// ============================================================================
+// SECTION 4: HEALTH CHECK (optional, useful for debugging)
+// ============================================================================
+// Frontend or admin can hit this to verify the AI services are working.
+// ============================================================================
+
+const healthCheck = async (req, res) => {
+  try {
+    const checks = {
+      groqConfigured: !!process.env.GROQ_API_KEY,
+      nvidiaConfigured: !!process.env.NVIDIA_API_KEY,
+      mongodbConfigured: !!process.env.MONGO_URI,
+      timestamp: new Date().toISOString(),
+    };
+
+    const allOk = checks.groqConfigured && checks.mongodbConfigured;
+
+    return res.status(allOk ? 200 : 503).json({
+      status: allOk ? "healthy" : "degraded",
+      checks,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      status: "error",
+      message: error.message,
+    });
+  }
+};
+
+// ============================================================================
+// EXPORTS
+// ============================================================================
+
 exports.generateDescription = generatePropertyDescription;
+exports.chatbot = chatbot;
+exports.healthCheck = healthCheck;

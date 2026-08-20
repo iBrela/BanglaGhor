@@ -189,39 +189,34 @@
     "title": "Meet Our Team",
     "members": [
       {
-        "name": "Nur E Siam",
+        "name": "Vishesh Sethi",
         "role": "Team Lead",
         "description": "Oversaw the entire project. Responsible for language translation and contributed significantly to UI development."
       },
       {
-        "name": "Ruffin Remad",
-        "role": "Project Manager & UI Developer",
+        "name": "Sanjana Rana",
+        "role": "UI Developer",
         "description": "Managed project backlog, coordinated team tasks, and contributed to UI development."
       },
       {
-        "name": "Ankit Malik",
+        "name": "Sazzad Hossain",
         "role": "Backend Lead",
         "description": "Handled MongoDB setup and Netlify integration. Oversaw backend architecture and deployment documentation."
       },
       {
-        "name": "Aaradhya Lamsal",
+        "name": "Vidhi Jaydipkumar Patel",
         "role": "Lead UI Developer",
         "description": "Focused on UI design and effective map integration."
       },
       {
-        "name": "Shivam Sharma",
+        "name": "Chamith Sanuditha Srirama",
         "role": "Backend Developer",
         "description": "Managed the property uploading and listing features."
       },
       {
-        "name": "Prabesh Bhattarai",
+        "name": "Nishama Warnakulasooriya Mahalekamge",
         "role": "AWS Developer",
         "description": "Handled AWS Cognito-based user verification and security flow checks."
-      },
-      {
-        "name": "Ashim Adhikari",
-        "role": "AWS Deployment Specialist",
-        "description": "Oversaw deployment pipelines and AWS infrastructure setup."
       }
     ]
   },
@@ -253,3 +248,4 @@
     ]
   }
 }
+ 

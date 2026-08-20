@@ -1,8 +1,7 @@
 const path = require("path");
 
-require("dotenv").config({
-  path: path.resolve(__dirname, "../.env"),
-});
+require("node:dns").setServers(["8.8.8.8", "1.1.1.1"]);
+require("dotenv").config({ path: "./.env" });
 
 const aiRoutes = require("./routes/aiRoutes");
 const propertyRoutes = require("./routes/propertyRoutes");
@@ -21,7 +20,7 @@ app.use(cors());
 app.use(express.json());
 
 // 3) API Routes
-app.use("/api", aiRoutes);
+app.use("/api/ai", aiRoutes);
 app.use("/api/properties", propertyRoutes);
 app.use("/api/users/:username/wishlist", wishlistRoutes);
 app.use("/api/user-profiles", userProfileRoutes);
