@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import axios from "axios";
-import { divisionCenters } from "../../../constants/divisionCenters"; 
+import { divisionCenters } from "../../../constants/divisionCenters";
+import { isWithinBangladesh } from "../bangladeshBounds";
 
 const API_BASE_URL =
   process.env.REACT_APP_API_URL || "http://localhost:5001/api";
@@ -213,7 +214,13 @@ const useMapData = (initialPropertyCode = null) => {
             position.coords.longitude,
           ]);
           if (normLocation) {
-            setUserLocation(normLocation); 
+            if (!isWithinBangladesh(normLocation.lat, normLocation.lng)) {
+              setError("Your current location is outside Bangladesh.");
+              isCenteringRef.current = false;
+              return;
+            }
+            setError(null);
+            setUserLocation(normLocation);
             setMapCenter([normLocation.lat, normLocation.lng]); // Set map center as [lat, lng]
             setMapZoom(13);
             if (!initialPropertyCode) {

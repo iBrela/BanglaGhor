@@ -156,6 +156,10 @@ const HomeMapPreview = () => {
               properties={properties}
               mapCenter={[23.8103, 90.4125]}
               mapZoom={7}
+              // Tighter than MapComponent's own default (32px) - this is a
+              // small preview box, so Bangladesh should fill more of it,
+              // without affecting the full /map page's fit.
+              fitPadding={10}
             />
           )}
         </Paper>
