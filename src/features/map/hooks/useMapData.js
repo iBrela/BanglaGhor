@@ -268,7 +268,28 @@ const useMapData = (initialPropertyCode = null) => {
   const clearSelectedProperty = useCallback(() => {
     setSelectedProperty(null);
     prevSelectedIdRef.current = null;
-    
+
+  }, []);
+
+  // Moves the camera to an arbitrary lat/lng (e.g. a selected place-search
+  // result) using the same mapCenter/mapZoom data flow as
+  // handleSelectProperty/locateUser above - not a new camera mechanism, just
+  // a new caller of the existing one. Clears any selected property, matching
+  // locateUser's behavior, since moving to a searched place isn't viewing a
+  // specific property.
+  const goToLocation = useCallback((lat, lng, zoom) => {
+    const normPos = normalizeToLatLngObject([lat, lng]);
+    if (!normPos) return;
+    isCenteringRef.current = true;
+    setSelectedProperty(null);
+    prevSelectedIdRef.current = null;
+    setMapCenter([normPos.lat, normPos.lng]);
+    if (typeof zoom === "number" && !isNaN(zoom)) {
+      setMapZoom(zoom);
+    }
+    setTimeout(() => {
+      isCenteringRef.current = false;
+    }, 300);
   }, []);
 
   const handleMapMove = useCallback((center, zoom) => {
@@ -291,6 +312,7 @@ const useMapData = (initialPropertyCode = null) => {
     locateUser,
     handleSelectProperty,
     clearSelectedProperty,
+    goToLocation,
     handleMapMove,
     fetchPropertyByCode, 
   };

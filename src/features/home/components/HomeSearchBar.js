@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from "react";
+import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import {
   Box,
   TextField,
@@ -6,53 +6,41 @@ import {
   InputAdornment,
   Paper,
   Typography,
-  Dialog,
-  DialogContent,
-  DialogTitle,
+  Autocomplete,
   IconButton,
   Tooltip,
 } from "@mui/material";
 import { alpha } from "@mui/material/styles";
 import SearchIcon from "@mui/icons-material/Search";
 import LocationOnIcon from "@mui/icons-material/LocationOn";
-import CloseIcon from "@mui/icons-material/Close";
 import MicIcon from "@mui/icons-material/Mic";
 import MicOffIcon from "@mui/icons-material/MicOff";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import axios from "axios";
 import Fuse from "fuse.js";
-import MapComponent from "../../map/components/MapComponent";
 import PropertyCardSuggestion from "./PropertyCardSuggestion";
- 
+import useLocationSearch from "../../map/hooks/useLocationSearch";
+
 const API_BASE_URL =
   process.env.REACT_APP_API_URL || "http://localhost:5001/api";
- 
+
+const MAX_PROPERTY_MATCHES = 5;
+
 const HomeSearchBar = () => {
   const navigate = useNavigate();
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [searchQuery, setSearchQuery] = useState("");
-  const [selectedLocation, setSelectedLocation] = useState(() =>
-    t("search_location")
-  );
-  const [showSuggestions, setShowSuggestions] = useState(false);
-  const [filteredProperties, setFilteredProperties] = useState([]);
   const [allProperties, setAllProperties] = useState([]);
-  const [loadingSuggestions, setLoadingSuggestions] = useState(false);
-  const [mapOpen, setMapOpen] = useState(false);
- 
+
   // ── Speech to text state ──────────────────────────────────────────────────
   const [isListening, setIsListening] = useState(false);
   const [speechSupported, setSpeechSupported] = useState(false);
   const recognitionRef = useRef(null);
   // ─────────────────────────────────────────────────────────────────────────
- 
+
   const searchContainerRef = useRef(null);
- 
-  useEffect(() => {
-    setSelectedLocation(t("search_location"));
-  }, [t]);
- 
+
   // ── Check browser speech support ─────────────────────────────────────────
   useEffect(() => {
     const SpeechRecognition =
@@ -63,35 +51,31 @@ const HomeSearchBar = () => {
       recognition.continuous = false;
       recognition.interimResults = true;
       recognition.lang = "en-US";
- 
+
       recognition.onresult = (event) => {
         const transcript = Array.from(event.results)
           .map((result) => result[0].transcript)
           .join("");
+        // Feeds the exact same reactive search pipeline typing does (see
+        // searchOptions below) - no separate voice-specific search logic
+        // needed anymore.
         setSearchQuery(transcript);
- 
-        // Run fuzzy search on the spoken text
-        if (transcript.length > 1 && fuse) {
-          const results = fuse.search(transcript);
-          setFilteredProperties(results.map((r) => r.item).slice(0, 5));
-          setShowSuggestions(true);
-        }
       };
- 
+
       recognition.onend = () => {
         setIsListening(false);
       };
- 
+
       recognition.onerror = (event) => {
         console.error("Speech recognition error:", event.error);
         setIsListening(false);
       };
- 
+
       recognitionRef.current = recognition;
     }
   }, []);
   // ─────────────────────────────────────────────────────────────────────────
- 
+
   useEffect(() => {
     const fetchAllProperties = async () => {
       try {
@@ -105,7 +89,7 @@ const HomeSearchBar = () => {
     };
     fetchAllProperties();
   }, []);
- 
+
   const fuse = useMemo(() => {
     if (!allProperties || allProperties.length === 0) return null;
     return new Fuse(allProperties, {
@@ -114,7 +98,45 @@ const HomeSearchBar = () => {
       threshold: 0.4,
     });
   }, [allProperties]);
- 
+
+  // Same M2 Phase 1 system already proven on /map: debounce, AbortController,
+  // cache, Bangladesh bbox/country filtering and query-script language
+  // priority all live in this one shared hook + backend endpoint - nothing
+  // location-related is reimplemented here.
+  const { results: placeResults, status: placeSearchStatus } =
+    useLocationSearch(searchQuery, i18n.language);
+
+  const propertyMatches = useMemo(() => {
+    if (!fuse || !searchQuery || searchQuery.trim().length < 2) return [];
+    return fuse
+      .search(searchQuery.trim())
+      .map((r) => r.item)
+      .slice(0, MAX_PROPERTY_MATCHES);
+  }, [fuse, searchQuery]);
+
+  // Combined, clearly-grouped dropdown: existing property matches (unchanged
+  // Fuse behavior) plus place-search results, exactly mirroring the proven
+  // /map pattern. A "view all results" option is appended to the Properties
+  // group when there are matches, preserving that existing shortcut.
+  const searchOptions = useMemo(() => {
+    if (!searchQuery || searchQuery.trim().length < 2) return [];
+    const propertyOptions = propertyMatches.map((p) => ({
+      __type: "property",
+      label: p.title,
+      property: p,
+    }));
+    const viewAllOption =
+      propertyOptions.length > 0
+        ? [{ __type: "view-all", label: t("view_all_results", "View all results") }]
+        : [];
+    const placeOptions = placeResults.map((place) => ({
+      __type: "place",
+      label: place.displayName,
+      place,
+    }));
+    return [...propertyOptions, ...viewAllOption, ...placeOptions];
+  }, [searchQuery, propertyMatches, placeResults, t]);
+
   // ── Toggle mic ────────────────────────────────────────────────────────────
   const handleMicToggle = () => {
     if (!recognitionRef.current) return;
@@ -123,65 +145,53 @@ const HomeSearchBar = () => {
       setIsListening(false);
     } else {
       setSearchQuery("");
-      setShowSuggestions(false);
       recognitionRef.current.start();
       setIsListening(true);
     }
   };
   // ─────────────────────────────────────────────────────────────────────────
- 
-  const handleSearchInputChange = (e) => {
-    const query = e.target.value;
-    setSearchQuery(query);
-    setLoadingSuggestions(true);
- 
-    if (query.length > 1 && fuse) {
-      const results = fuse.search(query);
-      setFilteredProperties(results.map((result) => result.item).slice(0, 5));
-      setShowSuggestions(true);
-    } else {
-      setFilteredProperties([]);
-      setShowSuggestions(false);
-    }
-    setLoadingSuggestions(false);
-  };
- 
-  const handlePropertySelect = (property) => {
-    const mode = property.mode || "rent";
-    navigate(`/properties/${mode}`);
-    setShowSuggestions(false);
-    setSearchQuery("");
-  };
- 
-  const handleSearch = () => {
+
+  const handlePropertySelect = useCallback(
+    (property) => {
+      const mode = property.mode || "rent";
+      navigate(`/properties/${mode}`);
+      setSearchQuery("");
+    },
+    [navigate]
+  );
+
+  const handleSearch = useCallback(() => {
     const queryParams = new URLSearchParams();
     if (searchQuery) queryParams.set("search", searchQuery);
     navigate(`/properties/rent?${queryParams.toString()}`);
-    setShowSuggestions(false);
-  };
- 
-  const handleOpenMap = () => setMapOpen(true);
-  const handleCloseMap = () => setMapOpen(false);
-  const handleLocationSelected = (locationName) => {
-    setSelectedLocation(locationName || t("search_location"));
-    handleCloseMap();
-  };
- 
-  useEffect(() => {
-    const handleClickOutside = (event) => {
-      if (
-        searchContainerRef.current &&
-        !searchContainerRef.current.contains(event.target)
-      ) {
-        setShowSuggestions(false);
+  }, [navigate, searchQuery]);
+
+  // Selecting a Place navigates to /map and hands off just the coordinates +
+  // Photon's own "type" via React Router navigation state (the same
+  // location.state pattern already used elsewhere in this app, e.g.
+  // EditPropertyPage's return-path handoff) - no fake property is created,
+  // and no MapLibre camera logic is duplicated here: /map's existing
+  // zoomForPlaceType + mapCenter/mapZoom flow (already proven in M2 Phase 1)
+  // does all of that on arrival.
+  const handleOptionSelect = useCallback(
+    (option) => {
+      if (!option || typeof option === "string") return;
+      if (option.__type === "property") {
+        handlePropertySelect(option.property);
+      } else if (option.__type === "view-all") {
+        handleSearch();
+      } else if (option.__type === "place") {
+        setSearchQuery("");
+        navigate("/map", {
+          state: {
+            place: { lat: option.place.lat, lng: option.place.lng, type: option.place.type },
+          },
+        });
       }
-    };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => {
-      document.removeEventListener("mousedown", handleClickOutside);
-    };
-  }, [searchContainerRef]);
- 
+    },
+    [handlePropertySelect, handleSearch, navigate]
+  );
+
   return (
     <>
       <Paper
@@ -204,154 +214,166 @@ const HomeSearchBar = () => {
         }}
         onClick={(e) => e.stopPropagation()}
       >
-        <Box
-          sx={{
-            position: "relative",
-            flex: { xs: "1 1 100%", md: 3 },
-            zIndex: 11,
+        <Autocomplete
+          freeSolo
+          filterOptions={(x) => x}
+          options={searchOptions}
+          loading={placeSearchStatus === "loading"}
+          inputValue={searchQuery}
+          onInputChange={(event, newValue, reason) => {
+            if (reason === "input") setSearchQuery(newValue);
           }}
-        >
-          <TextField
-            fullWidth
-            variant="outlined"
-            placeholder={
-              isListening
-                ? "🎤 Listening..."
-                : t("search_placeholder")
+          onChange={(event, newValue) => handleOptionSelect(newValue)}
+          groupBy={(option) =>
+            option.__type === "place"
+              ? t("search_group_places", "Places")
+              : t("search_group_properties", "Properties")
+          }
+          getOptionLabel={(option) =>
+            typeof option === "string" ? option : option.label
+          }
+          noOptionsText={
+            placeSearchStatus === "unavailable"
+              ? t(
+                  "location_search_unavailable_short",
+                  "Location search unavailable - property search still works"
+                )
+              : t("no_results", "No specific matches found.")
+          }
+          renderOption={(props, option) => {
+            if (option.__type === "view-all") {
+              const { key, ...rest } = props;
+              return (
+                <Box
+                  component="li"
+                  key={key || "view-all"}
+                  {...rest}
+                  sx={{ justifyContent: "center", color: "primary.main", fontWeight: 600 }}
+                >
+                  {option.label}
+                </Box>
+              );
             }
-            value={searchQuery}
-            onChange={handleSearchInputChange}
-            onFocus={() => setShowSuggestions(searchQuery.length > 1)}
-            InputProps={{
-              startAdornment: (
-                <InputAdornment position="start">
-                  <SearchIcon color="action" />
-                </InputAdornment>
-              ),
-              // ── Mic button inside the search field ──────────────────────
-              endAdornment: speechSupported ? (
-                <InputAdornment position="end">
-                  <Tooltip title={isListening ? "Stop listening" : "Search by voice"}>
-                    <IconButton
-                      onClick={handleMicToggle}
-                      size="small"
-                      sx={{
-                        color: isListening ? "#FF5F40" : "#7BAFC0",
-                        backgroundColor: isListening
-                          ? alpha("#FF5F40", 0.12)
-                          : "transparent",
-                        animation: isListening
-                          ? "pulse 1.2s infinite"
-                          : "none",
-                        "@keyframes pulse": {
-                          "0%": { boxShadow: "0 0 0 0 rgba(255,95,64,0.4)" },
-                          "70%": { boxShadow: "0 0 0 8px rgba(255,95,64,0)" },
-                          "100%": { boxShadow: "0 0 0 0 rgba(255,95,64,0)" },
-                        },
-                        "&:hover": {
-                          backgroundColor: isListening
-                            ? alpha("#FF5F40", 0.2)
-                            : alpha("#00D4E8", 0.1),
-                          color: isListening ? "#FF5F40" : "#00D4E8",
-                        },
-                      }}
-                    >
-                      {isListening ? <MicOffIcon /> : <MicIcon />}
-                    </IconButton>
-                  </Tooltip>
-                </InputAdornment>
-              ) : null,
-              // ─────────────────────────────────────────────────────────────
-              sx: {
-                borderRadius: "8px",
-                bgcolor: alpha("#EFF9FE", 0.5),
-                // cyan outline when listening
-                ...(isListening && {
-                  "& fieldset": { borderColor: "#FF5F40 !important" },
-                }),
-              },
-            }}
-          />
- 
-          {showSuggestions && (
-            <Paper
-              elevation={6}
-              sx={{
-                position: "absolute",
-                top: "105%",
-                left: 0,
-                right: 0,
-                bgcolor: "white",
-                borderRadius: "8px",
-                maxHeight: "400px",
-                overflowY: "auto",
-                zIndex: 12,
-                border: "1px solid rgba(0,0,0,0.1)",
-              }}
-            >
-              {loadingSuggestions && (
-                <Typography sx={{ p: 2, color: "text.secondary" }}>
-                  {t("sending")}
-                </Typography>
-              )}
-              {!loadingSuggestions && filteredProperties.length > 0 ? (
-                <>
-                  {filteredProperties.map((property) => (
-                    <PropertyCardSuggestion
-                      key={property._id || property.id}
-                      property={property}
-                      onSelect={() => handlePropertySelect(property)}
-                    />
-                  ))}
-                  <Box
+            if (option.__type === "property") {
+              const { key, ...rest } = props;
+              return (
+                <Box component="li" key={key || option.property._id} {...rest} sx={{ p: "0 !important" }}>
+                  <PropertyCardSuggestion property={option.property} onSelect={() => {}} />
+                </Box>
+              );
+            }
+            const secondaryContext = [option.place.context.district, option.place.context.division]
+              .filter(Boolean)
+              .join(", ");
+            const { key, ...rest } = props;
+            return (
+              <Box
+                component="li"
+                key={key || option.place.id}
+                {...rest}
+                sx={{ alignItems: "flex-start !important", py: 0.75 }}
+              >
+                <LocationOnIcon fontSize="small" sx={{ mr: 1, mt: 0.25, color: "text.secondary", flexShrink: 0 }} />
+                <Box sx={{ minWidth: 0, flex: 1 }}>
+                  <Typography
+                    variant="body2"
                     sx={{
-                      p: 1,
-                      textAlign: "center",
-                      borderTop: "1px solid rgba(0,0,0,0.05)",
+                      display: "-webkit-box",
+                      WebkitLineClamp: 2,
+                      WebkitBoxOrient: "vertical",
+                      overflow: "hidden",
                     }}
                   >
-                    <Button
-                      size="small"
-                      onClick={handleSearch}
-                      sx={{ textTransform: "none" }}
-                    >
-                      View all results
-                    </Button>
-                  </Box>
-                </>
-              ) : (
-                !loadingSuggestions &&
-                searchQuery.length > 1 && (
-                  <Typography sx={{ p: 2, color: "text.secondary" }}>
-                    No specific matches found.
+                    {option.place.shortName}
                   </Typography>
-                )
-              )}
-            </Paper>
-          )}
-        </Box>
- 
-        <TextField
-          variant="outlined"
-          fullWidth
-          value={selectedLocation}
-          onClick={handleOpenMap}
-          InputProps={{
-            startAdornment: (
-              <InputAdornment position="start">
-                <LocationOnIcon color="action" />
-              </InputAdornment>
-            ),
-            sx: {
-              borderRadius: "8px",
-              cursor: "pointer",
-              bgcolor: alpha("#EFF9FE", 0.5),
-            },
-            readOnly: true,
+                  {secondaryContext && (
+                    <Typography
+                      variant="caption"
+                      color="text.secondary"
+                      sx={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                    >
+                      {secondaryContext}
+                    </Typography>
+                  )}
+                </Box>
+              </Box>
+            );
           }}
-          sx={{ flex: { xs: "1 1 100%", md: 1 } }}
+          sx={{
+            flex: { xs: "1 1 100%", md: 1 },
+          }}
+          slotProps={{
+            popper: {
+              sx: { width: { xs: "100%", md: 420 } },
+              placement: "bottom-start",
+            },
+          }}
+          renderInput={(params) => (
+            <TextField
+              {...params}
+              fullWidth
+              variant="outlined"
+              placeholder={
+                isListening ? "🎤 Listening..." : t("search_placeholder")
+              }
+              onFocus={() => {}}
+              InputProps={{
+                ...params.InputProps,
+                startAdornment: (
+                  <InputAdornment position="start">
+                    <SearchIcon color="action" />
+                  </InputAdornment>
+                ),
+                // ── Mic button inside the search field ──────────────────────
+                endAdornment: (
+                  <>
+                    {params.InputProps.endAdornment}
+                    {speechSupported && (
+                      <InputAdornment position="end">
+                        <Tooltip title={isListening ? "Stop listening" : "Search by voice"}>
+                          <IconButton
+                            onClick={handleMicToggle}
+                            size="small"
+                            sx={{
+                              color: isListening ? "#FF5F40" : "#7BAFC0",
+                              backgroundColor: isListening
+                                ? alpha("#FF5F40", 0.12)
+                                : "transparent",
+                              animation: isListening ? "pulse 1.2s infinite" : "none",
+                              "@keyframes pulse": {
+                                "0%": { boxShadow: "0 0 0 0 rgba(255,95,64,0.4)" },
+                                "70%": { boxShadow: "0 0 0 8px rgba(255,95,64,0)" },
+                                "100%": { boxShadow: "0 0 0 0 rgba(255,95,64,0)" },
+                              },
+                              "&:hover": {
+                                backgroundColor: isListening
+                                  ? alpha("#FF5F40", 0.2)
+                                  : alpha("#00D4E8", 0.1),
+                                color: isListening ? "#FF5F40" : "#00D4E8",
+                              },
+                            }}
+                          >
+                            {isListening ? <MicOffIcon /> : <MicIcon />}
+                          </IconButton>
+                        </Tooltip>
+                      </InputAdornment>
+                    )}
+                  </>
+                ),
+                // ─────────────────────────────────────────────────────────────
+                sx: {
+                  borderRadius: "8px",
+                  bgcolor: alpha("#EFF9FE", 0.5),
+                  // cyan outline when listening
+                  ...(isListening && {
+                    "& fieldset": { borderColor: "#FF5F40 !important" },
+                  }),
+                },
+              }}
+            />
+          )}
         />
- 
+
         <Button
           variant="contained"
           color="primary"
@@ -374,41 +396,8 @@ const HomeSearchBar = () => {
           {t("search_button")}
         </Button>
       </Paper>
- 
-      <Dialog
-        open={mapOpen}
-        onClose={handleCloseMap}
-        maxWidth="lg"
-        fullWidth
-        PaperProps={{ sx: { borderRadius: "12px", overflow: "hidden" } }}
-      >
-        <DialogTitle
-          sx={{
-            bgcolor: "primary.main",
-            color: "white",
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            p: 2,
-          }}
-        >
-          Select Location
-          <IconButton onClick={handleCloseMap} sx={{ color: "white" }}>
-            <CloseIcon />
-          </IconButton>
-        </DialogTitle>
-        <DialogContent sx={{ p: 0, height: { xs: "60vh", md: "70vh" } }}>
-          <MapComponent
-            properties={allProperties}
-            mapCenter={[23.8103, 90.4125]}
-            mapZoom={7}
-            onMarkerClick={(prop) => handleLocationSelected(prop.location)}
-          />
-        </DialogContent>
-      </Dialog>
     </>
   );
 };
- 
+
 export default HomeSearchBar;
- 

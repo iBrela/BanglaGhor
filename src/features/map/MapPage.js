@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useCallback, useMemo } from "react";
 import {
   useParams,
-  useNavigate, 
+  useNavigate,
+  useLocation,
 } from "react-router-dom";
 import {
   Box,
@@ -13,6 +14,7 @@ import {
   Drawer,
   Divider,
   Snackbar,
+  Autocomplete,
   TextField,
   ToggleButtonGroup,
   ToggleButton,
@@ -27,11 +29,32 @@ import FilterListIcon from "@mui/icons-material/FilterList";
 import CloseIcon from "@mui/icons-material/Close";
 import SearchIcon from "@mui/icons-material/Search";
 import InfoIcon from "@mui/icons-material/Info";
+import LocationOnIcon from "@mui/icons-material/LocationOn";
+import HomeWorkIcon from "@mui/icons-material/HomeWork";
 import { useTranslation } from "react-i18next";
 import MapComponent from "./components/MapComponent";
 import PropertyInfoPanel from "./components/PropertyInfoPanel";
-import FilterSidebar from "../properties/components/FilterSidebar"; 
+import FilterSidebar from "../properties/components/FilterSidebar";
 import useMapData from "./hooks/useMapData";
+import useLocationSearch from "./hooks/useLocationSearch";
+
+// Zoom level to jump to when a place-search result is selected, keyed by
+// Photon's own normalized "type" field (verified against real API responses
+// during M2 development - see the M2 implementation report). Deliberately
+// generic by type, not by name - no hardcoded city/place logic.
+const PLACE_TYPE_ZOOM = {
+  state: 8, // division
+  county: 10, // district/upazila
+  city: 12,
+  district: 14, // city sub-area/neighbourhood (Photon's naming, e.g. "Gulshan")
+  locality: 14, // quarter, e.g. "Gulshan 2"
+  street: 16,
+  house: 17,
+};
+const DEFAULT_PLACE_ZOOM = 12;
+function zoomForPlaceType(type) {
+  return PLACE_TYPE_ZOOM[type] || DEFAULT_PLACE_ZOOM;
+}
 const constructAddressString = (property) => {
   if (!property) return "Location unavailable";
   if (property.address) return property.address; 
@@ -51,9 +74,10 @@ const constructAddressString = (property) => {
 };
 
 const MapPage = () => {
-  const { propertyCode } = useParams(); 
+  const { propertyCode } = useParams();
   const navigate = useNavigate();
-  const { t } = useTranslation();
+  const routerLocation = useLocation();
+  const { t, i18n } = useTranslation();
 
   const [searchQuery, setSearchQuery] = useState("");
   
@@ -83,11 +107,32 @@ const MapPage = () => {
     mapZoom,
     selectedProperty,
     locateUser,
-    handleSelectProperty, 
+    handleSelectProperty,
     clearSelectedProperty,
     handleMapMove,
-    fetchPropertyByCode, 
+    fetchPropertyByCode,
+    goToLocation,
   } = useMapData(propertyCode);
+
+  const { results: placeResults, status: placeSearchStatus } =
+    useLocationSearch(searchQuery, i18n.language);
+
+  // Consumes a Place selected on the homepage (HomeSearchBar navigates here
+  // with `state: { place: { lat, lng, type } }`, the same React Router
+  // location.state handoff pattern already used elsewhere in this app, e.g.
+  // EditPropertyPage's return-path). Runs once on mount only - not a
+  // continuous sync, so it can't create a camera feedback loop: it just
+  // calls the same goToLocation() the /map search dropdown already uses,
+  // reusing zoomForPlaceType so no camera/zoom logic is duplicated. Direct
+  // /map visits (no state) are completely unaffected - routerLocation.state
+  // is simply undefined then, and this effect no-ops.
+  useEffect(() => {
+    const place = routerLocation.state?.place;
+    if (place && typeof place.lat === "number" && typeof place.lng === "number") {
+      goToLocation(place.lat, place.lng, zoomForPlaceType(place.type));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     if (propertyCode && selectedProperty?._id === propertyCode) {
@@ -211,7 +256,42 @@ const MapPage = () => {
     return propsToFilter;
   }, [allMappableProperties, propertyTypeFilter, detailedFilters, searchQuery]);
 
-  const handleSearchChange = (e) => setSearchQuery(e.target.value);
+  // Combined search dropdown options: property matches (already computed
+  // above by the existing filter, unchanged) plus place-search results,
+  // clearly grouped so a "Property" option can never be confused with a
+  // "Place" one. Property text-filtering of the map's displayed dots (the
+  // existing behavior) is entirely unaffected by this - it's driven by
+  // filteredMapProperties/searchQuery above regardless of what's selected
+  // from this dropdown.
+  const searchOptions = useMemo(() => {
+    if (!searchQuery || searchQuery.trim().length < 2) return [];
+    const propertyOptions = filteredMapProperties.slice(0, 5).map((p) => ({
+      __type: "property",
+      label: p.title || "Unnamed Property",
+      property: p,
+    }));
+    const placeOptions = placeResults.map((place) => ({
+      __type: "place",
+      label: place.displayName,
+      place,
+    }));
+    return [...propertyOptions, ...placeOptions];
+  }, [searchQuery, filteredMapProperties, placeResults]);
+
+  const handleSearchOptionSelect = useCallback(
+    (option) => {
+      if (!option || typeof option === "string") return;
+      if (option.__type === "property") {
+        handleSelectProperty(option.property);
+        setSearchQuery(option.label);
+      } else if (option.__type === "place") {
+        goToLocation(option.place.lat, option.place.lng, zoomForPlaceType(option.place.type));
+        setSearchQuery("");
+      }
+    },
+    [handleSelectProperty, goToLocation]
+  );
+
   const handlePropertyTypeFilterChange = (event, newType) => {
     if (newType !== null) {
       setPropertyTypeFilter(newType);
@@ -293,28 +373,108 @@ const MapPage = () => {
           >
             {t("back", "Back")}
           </Button>
-          <TextField
-            placeholder={t(
-              "search_map_placeholder",
-              "Search title, address..."
-            )}
-            variant="outlined"
-            size="small"
-            value={searchQuery}
-            onChange={handleSearchChange}
-            InputProps={{
-              startAdornment: (
-                <InputAdornment position="start">
-                  <SearchIcon fontSize="small" />
-                </InputAdornment>
-              ),
-              sx: { borderRadius: "8px", fontSize: "0.875rem" },
+          <Autocomplete
+            freeSolo
+            filterOptions={(x) => x}
+            options={searchOptions}
+            loading={placeSearchStatus === "loading"}
+            inputValue={searchQuery}
+            onInputChange={(event, newValue, reason) => {
+              if (reason === "input") setSearchQuery(newValue);
+            }}
+            onChange={(event, newValue) => handleSearchOptionSelect(newValue)}
+            groupBy={(option) =>
+              option.__type === "property"
+                ? t("search_group_properties", "Properties")
+                : t("search_group_places", "Places")
+            }
+            getOptionLabel={(option) =>
+              typeof option === "string" ? option : option.label
+            }
+            noOptionsText={
+              placeSearchStatus === "unavailable"
+                ? t("location_search_unavailable", "Location search unavailable")
+                : t("no_results", "No results")
+            }
+            renderOption={(props, option) => {
+              const secondaryContext =
+                option.__type === "place"
+                  ? [option.place.context.district, option.place.context.division]
+                      .filter(Boolean)
+                      .join(", ")
+                  : "";
+              return (
+                <Box
+                  component="li"
+                  {...props}
+                  key={`${option.__type}-${option.label}-${option.place?.id || option.property?._id}`}
+                  sx={{ alignItems: "flex-start !important", py: 0.75 }}
+                >
+                  {option.__type === "property" ? (
+                    <HomeWorkIcon fontSize="small" sx={{ mr: 1, mt: 0.25, color: "text.secondary", flexShrink: 0 }} />
+                  ) : (
+                    <LocationOnIcon fontSize="small" sx={{ mr: 1, mt: 0.25, color: "text.secondary", flexShrink: 0 }} />
+                  )}
+                  <Box sx={{ minWidth: 0, flex: 1 }}>
+                    <Typography
+                      variant="body2"
+                      sx={{
+                        display: "-webkit-box",
+                        WebkitLineClamp: 2,
+                        WebkitBoxOrient: "vertical",
+                        overflow: "hidden",
+                      }}
+                    >
+                      {option.__type === "place" ? option.place.shortName : option.label}
+                    </Typography>
+                    {secondaryContext && (
+                      <Typography
+                        variant="caption"
+                        color="text.secondary"
+                        sx={{
+                          display: "block",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {secondaryContext}
+                      </Typography>
+                    )}
+                  </Box>
+                </Box>
+              );
             }}
             sx={{
-              width: { xs: "100%", sm: "auto" },
+              width: { xs: "100%", sm: 340, md: 440 },
               mt: { xs: 1, sm: 0 },
-              maxWidth: { sm: 250 },
             }}
+            slotProps={{
+              popper: {
+                sx: { width: { xs: "100%", sm: 420, md: 480 } },
+                placement: "bottom-start",
+              },
+            }}
+            renderInput={(params) => (
+              <TextField
+                {...params}
+                placeholder={t(
+                  "search_map_placeholder",
+                  "Search title, address, or place..."
+                )}
+                variant="outlined"
+                size="small"
+                InputProps={{
+                  ...params.InputProps,
+                  startAdornment: (
+                    <InputAdornment position="start">
+                      <SearchIcon fontSize="small" />
+                    </InputAdornment>
+                  ),
+                  sx: { borderRadius: "8px", fontSize: "0.875rem" },
+                }}
+              />
+            )}
           />
           <Tooltip title={t("filters", "Filters")}>
             <IconButton

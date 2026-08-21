@@ -32,6 +32,10 @@ const axios = require("axios");
 const NodeCache = require("node-cache");
 const Groq = require("groq-sdk");
 const GeocodeCache = require("../models/GeocodeCache");
+const {
+  BANGLADESH_BOUNDS_BUFFERED,
+  isWithinBangladesh,
+} = require("../../src/shared/bangladeshGeo");
 
 // ============================================================================
 // CONFIGURATION
@@ -55,7 +59,29 @@ const CONFIG = {
 
   // Bangladesh country code (filter results to Bangladesh only)
   COUNTRY_CODE: "bd",
+
+  // ── Autocomplete (Photon-only, see searchLocations() below) ──────────────
+  // Nominatim's own usage policy explicitly prohibits autocomplete:
+  // "Auto-complete search...is not yet supported by Nominatim and you must
+  // not implement such a service." (operations.osmfoundation.org/policies/
+  // nominatim/, verified directly before writing this). Photon is fair-use/
+  // throttled but has no such prohibition and is built for this. There is
+  // deliberately NO Nominatim fallback in the autocomplete path below.
+  AUTOCOMPLETE_MIN_QUERY_LENGTH: 2,
+  AUTOCOMPLETE_DEFAULT_LIMIT: 8,
+  AUTOCOMPLETE_MAX_LIMIT: 10,
+  AUTOCOMPLETE_TIMEOUT_MS: 3500,
 };
+
+// Photon's bbox param format is "minLon,minLat,maxLon,maxLat" (verified
+// against docs/api-v1.md). Reuses the same canonical bounds the map itself
+// uses - see src/shared/bangladeshGeo.js.
+const PHOTON_BBOX_PARAM = [
+  BANGLADESH_BOUNDS_BUFFERED.minLon,
+  BANGLADESH_BOUNDS_BUFFERED.minLat,
+  BANGLADESH_BOUNDS_BUFFERED.maxLon,
+  BANGLADESH_BOUNDS_BUFFERED.maxLat,
+].join(",");
 
 // ============================================================================
 // IN-MEMORY CACHE (fastest tier)
@@ -340,6 +366,202 @@ async function callPhoton(query) {
 }
 
 // ============================================================================
+// AUTOCOMPLETE / SEARCH: searchLocations (Photon only)
+// ============================================================================
+// Separate from geocode() above on purpose: geocode() is the existing
+// single-result RAG pipeline (Bangla AI translation + Nominatim-first +
+// Photon-fallback + persistent cache) and is left completely unchanged by
+// everything below. This is a new, independent, multi-result function for
+// keystroke-driven autocomplete, which per Nominatim's own policy must never
+// reach Nominatim - only Photon, with a controlled failure mode (never falls
+// back to Nominatim, per that policy).
+// ============================================================================
+
+// Normalizes one real Photon GeoJSON feature into the app's provider-
+// independent shape. Built from actual Photon responses captured during
+// development (photon.komoot.io/api/?q=Gulshan&bbox=...&countrycode=bd),
+// not a remembered/assumed schema. Real fields seen: osm_type, osm_id,
+// osm_key, osm_value, type (Photon's own normalized layer - "city", "state",
+// "county", "district", "locality", "street", "house"), name, city, county,
+// state, country, countrycode, postcode, street, district, locality, extent.
+//
+// Caveat discovered during real testing: Photon's "district"/"county" fields
+// are NOT consistently Bangladesh's administrative Zila (district) level -
+// "county" is sometimes an Upazila ("সিংগাইর উপজেলা"), sometimes a
+// metropolitan area ("Dhaka Metropolitan"), sometimes an actual district
+// ("চট্টগ্রাম জেলা"); "district" is sometimes used for a city sub-area
+// instead (e.g. "Gulshan" as the district of the locality "Gulshan 2").
+// context.district below is therefore a best-effort label, not a guaranteed
+// exact administrative match - documented here rather than overclaimed.
+function normalizePhotonFeature(feature) {
+  const props = feature?.properties || {};
+  const coords = feature?.geometry?.coordinates;
+  if (!Array.isArray(coords) || coords.length !== 2) return null;
+
+  const [lng, lat] = coords;
+  if (typeof lat !== "number" || typeof lng !== "number") return null;
+
+  const name = props.name;
+  if (!name) return null;
+
+  const contextParts = [props.city, props.county, props.state].filter(Boolean);
+  const displayName =
+    contextParts.length > 0 ? `${name}, ${contextParts.join(", ")}` : name;
+
+  return {
+    id: `photon:${props.osm_type || "?"}:${props.osm_id || `${lat},${lng}`}`,
+    displayName,
+    shortName: name,
+    lat,
+    lng,
+    type: props.type || props.osm_value || "location",
+    countryCode: (props.countrycode || "").toLowerCase(),
+    context: {
+      district: props.county || props.district || null,
+      division: props.state || null,
+    },
+    provider: "photon",
+  };
+}
+
+// Collapses same-name/same-type entries (confirmed a real, common occurrence
+// in Photon's Bangladesh results during testing - e.g. "Khulna City Bypass"
+// appearing 3x with different osm_ids for the same road, "Mymensingh"
+// appearing 2x as separate near-identical house-level entries). Keeps the
+// first occurrence, preserving Photon's own relevance ordering.
+function dedupeResults(results) {
+  const seen = new Set();
+  const deduped = [];
+  for (const r of results) {
+    const key = `${r.shortName.trim().toLowerCase()}|${r.type}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(r);
+  }
+  return deduped;
+}
+
+// Maps a resolved language ("en"/"bn") to Photon's `lang` request param.
+// Verified with real requests during development, not assumed:
+//   - Photon's `lang` param controls which language the ENTIRE response
+//     (name, city, county, state - all of them together) comes back in.
+//   - lang=bn is REJECTED by the public Photon instance (HTTP 400) - Bengali
+//     is not one of its explicitly supported lang values.
+//   - lang=default (or omitting lang) returns each feature's local/native
+//     OSM name, which for Bangladesh is Bangla - confirmed directly:
+//     "Chattogram" -> "চট্টগ্রাম", "Chattogram District" -> "চট্টগ্রাম জেলা".
+//   - There is no single response containing both an English AND a Bangla
+//     name side by side (no name:en/name:bn field pair like the basemap's
+//     OpenMapTiles tiles have) - it's one name per request, chosen by lang.
+function photonLangFor(lang) {
+  return lang === "bn" ? "default" : "en";
+}
+
+// Detects which language to actually request from Photon for a given query,
+// with the QUERY'S OWN SCRIPT taking priority over the app's UI language -
+// confirmed necessary because Photon's response language does NOT follow the
+// query's script on its own: typing "চট্টগ্রাম" with lang=en still returns
+// "Chattogram", and typing "Chattogram" with lang=default still returns
+// "চট্টগ্রাম" (see photonLangFor above). So if we always sent the UI
+// language, a Bangla query typed in an English-language UI would silently
+// come back in English - the exact bug this fixes.
+//
+// Reuses containsBangla() (defined above, already used by geocode()'s
+// Bangla-detection for its own unrelated Groq-translation step) - a plain
+// Unicode Bengali-block regex test, no AI/translation involved here either.
+//
+// Rule: Bengali characters present -> "bn" (regardless of any Latin mixed
+// in, e.g. house/road numbers). Else, any Latin letters present -> "en".
+// Else (pure digits/punctuation/symbols, or empty) -> null, meaning
+// "ambiguous" - the caller falls back to the app's UI language for that case
+// only.
+function detectQueryScript(query) {
+  if (containsBangla(query)) return "bn";
+  if (/[A-Za-z]/.test(query)) return "en";
+  return null;
+}
+
+/**
+ * Autocomplete/multi-result location search, Photon-only (never Nominatim -
+ * see policy note above). Used for keystroke-driven search UIs.
+ *
+ * @param {string} query
+ * @param {{ limit?: number, lang?: "en"|"bn" }} [options] options.lang is the
+ *   app's UI language, used ONLY as the fallback when the query's own script
+ *   is ambiguous (see detectQueryScript above) - the query's script wins
+ *   whenever it's detectable.
+ * @returns {Promise<{ results: Array, provider: "photon", status: "ok"|"unavailable" }>}
+ */
+async function searchLocations(query, options = {}) {
+  const trimmed = (query || "").trim();
+  if (trimmed.length < CONFIG.AUTOCOMPLETE_MIN_QUERY_LENGTH) {
+    return { results: [], provider: "photon", status: "ok" };
+  }
+
+  const limit = Math.min(
+    options.limit || CONFIG.AUTOCOMPLETE_DEFAULT_LIMIT,
+    CONFIG.AUTOCOMPLETE_MAX_LIMIT
+  );
+  // Query script takes priority over the UI language; UI language is only
+  // consulted when the query itself is ambiguous (numbers/punctuation only).
+  const effectiveLang = detectQueryScript(trimmed) || options.lang;
+  const photonLang = photonLangFor(effectiveLang);
+
+  // Language is part of the cache key, keyed by the EFFECTIVE (query-script-
+  // resolved) language rather than the raw UI language - Photon returns a
+  // DIFFERENT `name` (and city/county/state) per lang param for the exact
+  // same place, so a Bangla-resolved entry must never serve an
+  // English-resolved one or vice versa, regardless of which UI language
+  // happened to request it.
+  const cacheKey = `autocomplete:${normalizeQuery(trimmed)}:${limit}:${photonLang}`;
+  const cached = getFromMemoryCache(cacheKey);
+  if (cached) return cached;
+
+  try {
+    const response = await axios.get("https://photon.komoot.io/api/", {
+      params: {
+        q: trimmed,
+        // Fetch extra candidates since defensive filtering + dedupe below
+        // can remove some - real testing showed this is worth doing (see
+        // M2 audit report for the Khulna/Mymensingh duplicate examples).
+        limit: Math.min(limit * 2, 20),
+        lang: photonLang,
+        bbox: PHOTON_BBOX_PARAM,
+        countrycode: CONFIG.COUNTRY_CODE,
+      },
+      headers: { "User-Agent": CONFIG.USER_AGENT },
+      timeout: CONFIG.AUTOCOMPLETE_TIMEOUT_MS,
+    });
+
+    const features = response.data?.features || [];
+    const normalized = features
+      .map(normalizePhotonFeature)
+      .filter(Boolean)
+      // Defensive: bbox/countrycode are Photon's own hard filters, but a
+      // rectangular bbox can't perfectly match Bangladesh's real border, and
+      // countrycode depends on the underlying OSM tag being correct/present.
+      // Re-checking against the same buffered bounds the map itself trusts
+      // catches any edge-case leak rather than assuming the provider is
+      // airtight.
+      .filter((r) => isWithinBangladesh(r.lat, r.lng));
+
+    const deduped = dedupeResults(normalized).slice(0, limit);
+    const result = { results: deduped, provider: "photon", status: "ok" };
+
+    saveToMemoryCache(cacheKey, result);
+    return result;
+  } catch (error) {
+    console.error(
+      "[LocationService] Photon autocomplete error:",
+      error.code || error.message
+    );
+    // Controlled failure - never falls back to Nominatim (policy), never
+    // throws to the caller.
+    return { results: [], provider: "photon", status: "unavailable" };
+  }
+}
+
+// ============================================================================
 // MAIN PUBLIC FUNCTION: geocode
 // ============================================================================
 /**
@@ -495,6 +717,7 @@ async function findNearbyCached(coords, radiusKm = 5) {
 // ============================================================================
 module.exports = {
   geocode,
+  searchLocations,
   getDistanceKm,
   getCacheStats,
   clearMemoryCache,
