@@ -50,6 +50,21 @@ const BUY_COLOR = "#2E7D32"; // MUI success.main
 const SOLD_COLOR = "#757575"; // MUI grey (default)
 const FONT_BOLD = "Noto Sans Bold"; // same glyph stack the basemap style already loads
 
+// Route line colors. A vivid blue reads clearly as "this is a route" (the
+// same convention most map apps use) and, more importantly here, contrasts
+// strongly against this basemap's own road palette, which is entirely warm
+// amber/orange tones (see mapBasemapStyle.js) - never confusable with the
+// property markers above, since those are small dots/pills, not a
+// continuous line, regardless of hue closeness to RENT_COLOR.
+const ROUTE_LINE_COLOR = "#1A73E8";
+const ROUTE_CASING_COLOR = "#ffffff";
+// Caps how tight the camera zooms in when fitting a very short route (e.g.
+// a walking route across one block) - fitBounds would otherwise zoom in to
+// the map's own MAX_ZOOM, which reads as an unhelpfully extreme close-up
+// for a route that's only a few dozen meters long.
+const ROUTE_FIT_MAX_ZOOM = 16;
+const ROUTE_FIT_PADDING = 64;
+
 // Individual property dots are hidden entirely below this zoom (nationwide/
 // regional views stay clean, basemap-only). Matches road-secondary-tertiary's
 // own minzoom in mapBasemapStyle.js, so dots only appear once there's
@@ -141,6 +156,37 @@ function propertiesToGeoJSON(properties) {
   };
 }
 
+const EMPTY_FEATURE_COLLECTION = { type: "FeatureCollection", features: [] };
+
+// route is the normalized object useRouting/the backend returns
+// ({ distanceMeters, durationSeconds, mode, geometry }) or null - never a
+// raw Valhalla shape, and never decoded here (the backend already returns a
+// ready GeoJSON LineString via routingService.js's legsToGeoJSON).
+function routeToGeoJSON(route) {
+  if (!route || !route.geometry) return EMPTY_FEATURE_COLLECTION;
+  return {
+    type: "FeatureCollection",
+    features: [{ type: "Feature", geometry: route.geometry, properties: {} }],
+  };
+}
+
+function boundsFromLineString(coordinates) {
+  let minLng = Infinity;
+  let minLat = Infinity;
+  let maxLng = -Infinity;
+  let maxLat = -Infinity;
+  for (const [lng, lat] of coordinates) {
+    if (lng < minLng) minLng = lng;
+    if (lng > maxLng) maxLng = lng;
+    if (lat < minLat) minLat = lat;
+    if (lat > maxLat) maxLat = lat;
+  }
+  return [
+    [minLng, minLat],
+    [maxLng, maxLat],
+  ];
+}
+
 // Shared by both the circle-dot layer and the price-pill layer so the color
 // scheme (selected pink > listing-type color) is defined in exactly one place.
 const markerColorExpression = [
@@ -172,15 +218,22 @@ const MapComponent = ({
   // homepage preview) request a tighter/looser fit without changing the
   // default for every other consumer (/map, HomeSearchBar's picker).
   fitPadding = INITIAL_FIT_PADDING,
+  // Optional: { distanceMeters, durationSeconds, mode, geometry } from
+  // useRouting, or null/undefined for "no route shown" - see the dedicated
+  // sync effect below. Entirely independent of the properties source/layers
+  // (own source id, own layers, added/removed without touching them).
+  route = null,
 }) => {
   const containerRef = useRef(null);
   const mapRef = useRef(null);
   const protocolRef = useRef(null);
   const propertiesRef = useRef(properties);
+  const routeRef = useRef(route);
   const selectedIdRef = useRef(null);
   const styleLoadedRef = useRef(false);
 
   propertiesRef.current = properties;
+  routeRef.current = route;
 
   // ── Initialize map once ────────────────────────────────────────────────
   useEffect(() => {
@@ -251,6 +304,37 @@ const MapComponent = ({
     map.addControl(new maplibregl.NavigationControl(), "top-right");
 
     map.on("load", () => {
+      // Route source/layers added BEFORE the properties source/layers below
+      // so property markers and price labels always render on top of the
+      // route line - the route stays visible against the (warm-toned) roads
+      // underneath it without ever covering a marker and making it
+      // unclickable.
+      map.addSource("route", {
+        type: "geojson",
+        data: routeToGeoJSON(routeRef.current),
+      });
+      map.addLayer({
+        id: "route-casing",
+        type: "line",
+        source: "route",
+        layout: { "line-cap": "round", "line-join": "round" },
+        paint: {
+          "line-color": ROUTE_CASING_COLOR,
+          "line-width": ["interpolate", ["linear"], ["zoom"], 10, 4, 16, 8],
+          "line-opacity": 0.9,
+        },
+      });
+      map.addLayer({
+        id: "route-line",
+        type: "line",
+        source: "route",
+        layout: { "line-cap": "round", "line-join": "round" },
+        paint: {
+          "line-color": ROUTE_LINE_COLOR,
+          "line-width": ["interpolate", ["linear"], ["zoom"], 10, 2.5, 16, 5.5],
+        },
+      });
+
       map.addSource("properties", {
         type: "geojson",
         data: propertiesToGeoJSON(propertiesRef.current),
@@ -345,6 +429,31 @@ const MapComponent = ({
       source.setData(propertiesToGeoJSON(properties));
     }
   }, [properties]);
+
+  // ── Sync route → GeoJSON source, fit camera to it when it's new ────────
+  // Only fires fitBounds when a route actually arrives (new geometry) - not
+  // on every render, and never when route is cleared (route=null just wipes
+  // the source data, camera is left exactly where the user has it, per the
+  // "don't force back to nationwide view" requirement). fitBounds's own
+  // moveend/zoomend firing is handled by the existing mapCenter/mapZoom sync
+  // effect's own unchanged-position guard below - no new feedback-loop
+  // mechanism needed here.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !styleLoadedRef.current) return;
+    const source = map.getSource("route");
+    if (!source) return;
+
+    source.setData(routeToGeoJSON(route));
+
+    const coordinates = route?.geometry?.coordinates;
+    if (coordinates && coordinates.length > 0) {
+      map.fitBounds(boundsFromLineString(coordinates), {
+        padding: ROUTE_FIT_PADDING,
+        maxZoom: ROUTE_FIT_MAX_ZOOM,
+      });
+    }
+  }, [route]);
 
   // ── Sync selected marker styling via feature-state ─────────────────────
   useEffect(() => {

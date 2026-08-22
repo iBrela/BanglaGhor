@@ -1,10 +1,11 @@
-# Local Valhalla Routing Setup (Phase A)
+# Local Valhalla Routing Setup
 
-Proof-of-concept / local-dev setup for a self-hosted Valhalla routing engine,
-built from the same Bangladesh OSM extract already used for the PMTiles
-basemap (M1) and the POI database (M3). This is infrastructure only - there
-is no Express integration yet (see `server/services/poiService.js`-style
-integration, planned for Phase B).
+Local-dev setup for the self-hosted Valhalla routing engine that
+`server/services/routingService.js` talks to, built from the same
+Bangladesh OSM extract already used for the PMTiles basemap and the POI
+database. This document covers the Valhalla/Docker side only - see
+`routingService.js`, `routingController.js`, and `accessibilityService.js`
+for how the Express backend consumes it.
 
 Valhalla is a long-running service - it cannot run inside a Netlify
 Function, so in every environment (local dev and production) it runs as its
@@ -97,11 +98,49 @@ The service is ready once `/status` responds:
 curl http://localhost:8002/status
 ```
 
-## 6. Rebuilding after the source PBF changes
+## 6. Normal start / stop (day-to-day - does NOT rebuild)
 
-The image's default restart behavior (`use_tiles_ignore_pbf=True`) will
-otherwise just re-serve whatever's already in `valhalla_tiles/` without
-rebuilding - **explicitly force a rebuild**:
+Once section 5 has built the tiles once, everyday start/stop of the *same*
+container is fast (a few seconds) and never rebuilds, because the image's
+own default (`use_tiles_ignore_pbf=True`) just loads the existing
+`valhalla_tiles.tar`:
+
+```bash
+docker stop banglaghar-valhalla
+docker start banglaghar-valhalla   # NOT `docker run` - see the warning below
+```
+
+Confirm it came back up correctly (should return almost immediately):
+
+```bash
+curl http://localhost:8002/status
+```
+
+`docker logs banglaghar-valhalla --tail 20` should show `Found routing
+tiles with 'use_tiles_ignore_pbf' True` / `Jumping directly to the tile
+loading!`, not `Running valhalla_build_tiles`. If you see the latter after a
+plain `docker start`, something is wrong - see the warning immediately
+below.
+
+**Important Docker semantics gotcha, discovered the hard way**: environment
+variables are baked into a container at `docker run`/`docker create` time,
+not re-read on every `docker start`. If a container was ever created with
+`-e force_rebuild=True` (e.g. by copy-pasting section 7's forced-rebuild
+command as your *normal* start command), **every subsequent `docker start`
+on that same container will rebuild again** - in this environment that
+cost roughly 40 minutes, discovered when a container created this way was
+restarted and appeared to hang. The fix is not a flag - it's to never reuse
+a force_rebuild container for ordinary start/stop: after finishing a
+forced rebuild (section 7), immediately recreate the container with the
+plain command in section 5 (no `force_rebuild`) before doing anything else
+with it, so every future `docker start` on it stays fast. This has been
+verified directly against this repository's own Valhalla container.
+
+## 7. Rebuilding after the source PBF changes
+
+`use_tiles_ignore_pbf=True` (the default) means a plain restart never
+rebuilds - **explicitly force a rebuild** when you have new/changed OSM
+data:
 
 ```bash
 docker rm -f banglaghar-valhalla
@@ -118,20 +157,40 @@ docker run -dt --name banglaghar-valhalla \
 `admins.sqlite`, `timezones.sqlite`, and `default_speeds.json` do not need to
 be deleted - they're reused automatically.
 
-## 7. Environment variable for the future backend
+**Immediately after this rebuild finishes**, recreate the container without
+`force_rebuild` so it's safe for normal start/stop from then on (see the
+warning in section 6):
 
-Not implemented yet (Phase B), but the value the Express backend will use,
-following this repo's existing plain-`UPPER_SNAKE` env convention:
+```bash
+docker rm -f banglaghar-valhalla
+docker run -dt --name banglaghar-valhalla \
+  -p 8002:8002 \
+  -e server_threads=1 \
+  -v "<absolute-repo-path>/map-build/data/valhalla/custom_files:/custom_files" \
+  ghcr.io/valhalla/valhalla-scripted:latest
+```
+
+This picks the already-just-built tiles straight back up (same
+`use_tiles_ignore_pbf=True` fast path as section 6) - it does not rebuild
+again.
+
+## 8. Environment variable for the backend
+
+The value the Express backend reads via `VALHALLA_URL` (see
+`server/services/routingService.js`), following this repo's existing plain-
+`UPPER_SNAKE` env convention:
 
 ```
 VALHALLA_URL=http://localhost:8002
 ```
 
 No API key - this is a fully self-hosted, unauthenticated local service.
+The application has no other runtime dependency on Valhalla beyond this one
+URL - nothing else needs to know it's Docker-based, self-hosted, or how it
+was built.
 
-## 8. Stopping / cleanup
+## 9. Removing the container entirely
 
 ```bash
-docker stop banglaghar-valhalla   # keeps the container, and the built tiles on disk
-docker rm banglaghar-valhalla     # removes the container object only - /custom_files data on disk is untouched
+docker rm -f banglaghar-valhalla   # removes the container object only - /custom_files data on disk is untouched, rebuild from section 5 to recreate it
 ```

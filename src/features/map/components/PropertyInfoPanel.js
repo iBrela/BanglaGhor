@@ -10,6 +10,10 @@ import {
   Stack,
   Tooltip,
   Alert,
+  ToggleButtonGroup,
+  ToggleButton,
+  CircularProgress,
+  IconButton,
 } from "@mui/material";
 import BedIcon from "@mui/icons-material/Bed";
 import BathtubIcon from "@mui/icons-material/Bathtub";
@@ -22,6 +26,11 @@ import InfoIcon from "@mui/icons-material/Info";
 import ErrorIcon from "@mui/icons-material/Error";
 import WarningIcon from "@mui/icons-material/Warning";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
+import AltRouteIcon from "@mui/icons-material/AltRoute";
+import DirectionsCarIcon from "@mui/icons-material/DirectionsCar";
+import DirectionsWalkIcon from "@mui/icons-material/DirectionsWalk";
+import DirectionsBikeIcon from "@mui/icons-material/DirectionsBike";
+import CloseIcon from "@mui/icons-material/Close";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 
@@ -141,11 +150,47 @@ const getLocationAccuracyInfo = (accuracy) => {
   }
 };
 
+// Route distance/duration, formatted for the compact summary line next to
+// the route controls below - independent of formatDisplayPrice above.
+function formatRouteDistance(meters) {
+  if (typeof meters !== "number") return "";
+  return meters < 1000 ? `${Math.round(meters)} m` : `${(meters / 1000).toFixed(1)} km`;
+}
+function formatRouteDuration(seconds) {
+  if (typeof seconds !== "number") return "";
+  const totalMinutes = Math.round(seconds / 60);
+  if (totalMinutes < 60) return `${totalMinutes} min`;
+  return `${Math.floor(totalMinutes / 60)}h ${totalMinutes % 60}m`;
+}
+
+const ROUTE_MODES = [
+  { value: "driving", icon: <DirectionsCarIcon fontSize="small" /> },
+  { value: "walking", icon: <DirectionsWalkIcon fontSize="small" /> },
+  { value: "cycling", icon: <DirectionsBikeIcon fontSize="small" /> },
+];
+
 /**
  * PropertyInfoPanel Component - Enhanced for better property details display
  * with improved address handling and location accuracy indicators
  */
-const PropertyInfoPanel = ({ selectedProperty }) => {
+const PropertyInfoPanel = ({
+  selectedProperty,
+  // All optional - Phase D routing additions. Panel renders exactly as
+  // before (no new row at all) when these aren't passed, so any other
+  // caller of PropertyInfoPanel is entirely unaffected.
+  routeStatus,
+  route,
+  routeMode,
+  onRouteModeChange,
+  onShowRoute,
+  onClearRoute,
+  // Optional - when provided (MapPage wires it), "View Details" reports the
+  // click upward instead of navigating directly, so MapPage can snapshot
+  // its camera/selection onto the current history entry first (see
+  // MapPage's handleViewDetails). Falls back to navigating directly, same
+  // as before, for any other caller that doesn't pass it.
+  onViewDetails,
+}) => {
   const navigate = useNavigate();
   const { t } = useTranslation();
 
@@ -189,7 +234,11 @@ const PropertyInfoPanel = ({ selectedProperty }) => {
       console.error("Cannot navigate - property ID is missing");
       return;
     }
-    navigate(`/properties/details/${selectedProperty._id}`);
+    if (onViewDetails) {
+      onViewDetails(selectedProperty);
+    } else {
+      navigate(`/properties/details/${selectedProperty._id}`);
+    }
   };
 
   
@@ -395,6 +444,79 @@ const PropertyInfoPanel = ({ selectedProperty }) => {
           </Button>
         </Grid>
       </Grid>
+
+      {/* Route controls (Phase D) - only rendered when a caller wires the
+          route props above; entirely absent otherwise, so this never
+          affects any other consumer of PropertyInfoPanel. A new row rather
+          than fitting into the Grid above so the existing action buttons'
+          layout (already tight on narrow screens) is untouched. */}
+      {onShowRoute && (
+        <Box
+          sx={{
+            mt: 1.5,
+            pt: 1.5,
+            borderTop: "1px solid rgba(0,0,0,0.08)",
+            display: "flex",
+            alignItems: "center",
+            flexWrap: "wrap",
+            gap: 1,
+          }}
+        >
+          <ToggleButtonGroup
+            value={routeMode || "driving"}
+            exclusive
+            size="small"
+            onChange={(event, newMode) => {
+              if (newMode && onRouteModeChange) onRouteModeChange(newMode);
+            }}
+            aria-label={t("route_mode", "Travel mode")}
+          >
+            {ROUTE_MODES.map((m) => (
+              <ToggleButton key={m.value} value={m.value} sx={{ px: 1 }}>
+                {m.icon}
+              </ToggleButton>
+            ))}
+          </ToggleButtonGroup>
+
+          <Button
+            variant="outlined"
+            size="small"
+            startIcon={
+              routeStatus === "locating" || routeStatus === "loading" ? (
+                <CircularProgress size={16} thickness={5} />
+              ) : (
+                <AltRouteIcon fontSize="small" />
+              )
+            }
+            onClick={onShowRoute}
+            disabled={routeStatus === "locating" || routeStatus === "loading"}
+            sx={{ borderRadius: "8px", textTransform: "none" }}
+          >
+            {routeStatus === "locating"
+              ? t("route_locating", "Locating...")
+              : routeStatus === "loading"
+              ? t("route_calculating", "Calculating...")
+              : t("show_route", "Show Route")}
+          </Button>
+
+          {routeStatus === "ok" && route && (
+            <>
+              <Chip
+                size="small"
+                label={`${formatRouteDistance(route.distanceMeters)} · ${formatRouteDuration(
+                  route.durationSeconds
+                )}`}
+                sx={{ fontWeight: 600 }}
+              />
+              <Tooltip title={t("clear_route", "Clear route")}>
+                <IconButton size="small" onClick={onClearRoute} aria-label={t("clear_route", "Clear route")}>
+                  <CloseIcon fontSize="small" />
+                </IconButton>
+              </Tooltip>
+            </>
+          )}
+        </Box>
+      )}
     </Paper>
   );
 };

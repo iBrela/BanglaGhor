@@ -9,7 +9,12 @@ const {
   handleValidationErrors,
 } = require("../middleware/ValidationMiddleware");
 const { body, param, query } = require("express-validator");
-const multer = require("multer"); 
+const multer = require("multer");
+const accessibilityController = require("../controllers/accessibilityController");
+const routingService = require("../services/routingService");
+const PointOfInterest = require("../models/PointOfInterest");
+
+const VALID_ACCESSIBILITY_MODES = Object.keys(routingService.MODE_TO_COSTING);
 
 // >> ENSURE THIS MULTER CONFIGURATION IS PRESENT AND CORRECT <<
 // Configure multer for memory storage
@@ -285,6 +290,47 @@ router.delete(
   ],
   handleValidationErrors, //
   propertyController.deleteProperty //
+);
+
+// ============================================================================
+// ACCESSIBILITY (Phase E) - additive, read-only sub-resources of a property.
+// Deliberately kept out of propertyController.js (a different concern -
+// travel-time/POI accessibility, not property CRUD) - handlers live in
+// accessibilityController.js, reused as-is from accessibilityRoutes.js's
+// standalone /api/accessibility/nearby endpoint. Existing property routes
+// above are completely unchanged.
+// ============================================================================
+router.get(
+  "/:id/accessibility",
+  [
+    param("id").isMongoId().withMessage("Invalid property ID format."),
+    query("category")
+      .isIn(PointOfInterest.CATEGORIES)
+      .withMessage(`category must be one of: ${PointOfInterest.CATEGORIES.join(", ")}`),
+    query("mode")
+      .optional()
+      .isIn(VALID_ACCESSIBILITY_MODES)
+      .withMessage(`mode must be one of: ${VALID_ACCESSIBILITY_MODES.join(", ")}`),
+    query("radius").optional().isFloat({ gt: 0 }).withMessage("radius must be a positive number."),
+    query("candidateLimit").optional().isInt({ gt: 0 }).withMessage("candidateLimit must be a positive integer."),
+    query("limit").optional().isInt({ gt: 0 }).withMessage("limit must be a positive integer."),
+    query("maxMinutes").optional().isFloat({ gt: 0 }).withMessage("maxMinutes must be a positive number."),
+  ],
+  handleValidationErrors,
+  accessibilityController.getPropertyAccessibility
+);
+
+router.get(
+  "/:id/accessibility-summary",
+  [
+    param("id").isMongoId().withMessage("Invalid property ID format."),
+    query("mode")
+      .optional()
+      .isIn(VALID_ACCESSIBILITY_MODES)
+      .withMessage(`mode must be one of: ${VALID_ACCESSIBILITY_MODES.join(", ")}`),
+  ],
+  handleValidationErrors,
+  accessibilityController.getPropertyAccessibilitySummary
 );
 
 module.exports = router;

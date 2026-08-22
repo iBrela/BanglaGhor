@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from "react";
+import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import {
   useParams,
   useNavigate,
@@ -37,6 +37,7 @@ import PropertyInfoPanel from "./components/PropertyInfoPanel";
 import FilterSidebar from "../properties/components/FilterSidebar";
 import useMapData from "./hooks/useMapData";
 import useLocationSearch from "./hooks/useLocationSearch";
+import useRouting from "./hooks/useRouting";
 
 // Zoom level to jump to when a place-search result is selected, keyed by
 // Photon's own normalized "type" field (verified against real API responses
@@ -112,10 +113,69 @@ const MapPage = () => {
     handleMapMove,
     fetchPropertyByCode,
     goToLocation,
+    restoreMapState,
   } = useMapData(propertyCode);
 
   const { results: placeResults, status: placeSearchStatus } =
     useLocationSearch(searchQuery, i18n.language);
+
+  const { route, status: routeStatus, showRouteToDestination, clearRoute } =
+    useRouting();
+  const [routeMode, setRouteMode] = useState("driving");
+
+  // "Show Route" entry point - from an existing property interaction (the
+  // selected property's info panel), per the Phase D brief. Reuses the
+  // already-fetched userLocation (from a prior "Locate Me") as the origin
+  // when available, so a second click doesn't re-prompt geolocation; the
+  // hook itself falls back to a fresh geolocation request when there isn't
+  // one yet.
+  const handleShowRoute = useCallback(() => {
+    if (!selectedProperty?.position) return;
+    showRouteToDestination(
+      selectedProperty.position.lat,
+      selectedProperty.position.lng,
+      routeMode,
+      userLocation
+    );
+  }, [selectedProperty, routeMode, userLocation, showRouteToDestination]);
+
+  // A route to a property that's no longer selected (switched to another
+  // property, or deselected) would just be confusing - clear it
+  // automatically rather than leaving a stale/wrong line on the map. Does
+  // NOT clear the selection itself (that stays owned by useMapData, exactly
+  // as before) and does not reset filters/search/camera.
+  const selectedPropertyIdRef = useRef(null);
+  useEffect(() => {
+    const currentId = selectedProperty?._id || null;
+    if (
+      selectedPropertyIdRef.current !== null &&
+      selectedPropertyIdRef.current !== currentId
+    ) {
+      clearRoute();
+    }
+    selectedPropertyIdRef.current = currentId;
+  }, [selectedProperty, clearRoute]);
+
+  // Surfaces routing failures through the page's existing Snackbar rather
+  // than a new UI element - raw backend/Valhalla errors are never shown
+  // (routingController.js/useRouting.js already reduce them to a small
+  // status enum before they ever reach here).
+  useEffect(() => {
+    const ROUTE_STATUS_MESSAGES = {
+      "no-route": ["route_not_found", "No route could be found to this property.", "warning"],
+      unavailable: ["route_engine_unavailable", "Routing is temporarily unavailable. Please try again later.", "error"],
+      "geolocation-denied": ["geolocation_denied", "Location access was denied. Enable location permissions to get directions.", "warning"],
+      "geolocation-unavailable": ["geolocation_unavailable", "Your browser does not support location services.", "warning"],
+      "outside-bangladesh": ["route_origin_outside_bangladesh", "Your current location is outside Bangladesh.", "warning"],
+      error: ["route_error", "Could not calculate a route.", "error"],
+    };
+    const entry = ROUTE_STATUS_MESSAGES[routeStatus];
+    if (entry) {
+      const [key, fallback, severity] = entry;
+      showNotification(t(key, fallback), severity);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [routeStatus]);
 
   // Consumes a Place selected on the homepage (HomeSearchBar navigates here
   // with `state: { place: { lat, lng, type } }`, the same React Router
@@ -130,6 +190,30 @@ const MapPage = () => {
     const place = routerLocation.state?.place;
     if (place && typeof place.lat === "number" && typeof place.lng === "number") {
       goToLocation(place.lat, place.lng, zoomForPlaceType(place.type));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Restores the exact camera position (and, if any, the selected property)
+  // the user had on THIS /map view right before they clicked "View Details"
+  // and navigated away - see handleViewDetails below, which snapshots it
+  // onto this same history entry via navigate(path, {replace:true, state}).
+  // Pressing Back returns to that same entry, so routerLocation.state.
+  // fromMap is populated again on remount - read once here, exactly like
+  // the place-restore effect above, so it can't create a feedback loop or
+  // re-fire on its own. Only handled when the URL has no :propertyCode of
+  // its own - that case already has its own correct, dedicated centering
+  // logic (the initialPropertyCode effect inside useMapData), which this
+  // deliberately never overrides. Direct /map visits and the Home-> place
+  // handoff above are both unaffected, since neither ever sets
+  // state.fromMap.
+  useEffect(() => {
+    if (propertyCode) return;
+    const fromMap = routerLocation.state?.fromMap;
+    if (!fromMap || !Array.isArray(fromMap.center) || typeof fromMap.zoom !== "number") return;
+    restoreMapState(fromMap.center, fromMap.zoom);
+    if (fromMap.selectedPropertyId) {
+      fetchPropertyByCode(fromMap.selectedPropertyId, { preserveCamera: true });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -330,6 +414,32 @@ const MapPage = () => {
       handleSelectProperty(property);
     },
     [handleSelectProperty]
+  );
+
+  // "View Details" from the map - snapshots the current camera + selected
+  // property onto THIS /map history entry (replace: no new entry, no URL
+  // change) before navigating away, so browser Back restores exactly this
+  // view instead of remounting MapPage with no state at all (see the
+  // restoration effect above). A plain replace here is safe to call
+  // multiple times in a row (e.g. selecting different properties before
+  // ever clicking View Details) since it always overwrites the same entry,
+  // never accumulates extra history entries.
+  const handleViewDetails = useCallback(
+    (property) => {
+      if (!property?._id) return;
+      navigate(routerLocation.pathname, {
+        replace: true,
+        state: {
+          fromMap: {
+            center: mapCenter,
+            zoom: mapZoom,
+            selectedPropertyId: property._id,
+          },
+        },
+      });
+      navigate(`/properties/details/${property._id}`);
+    },
+    [navigate, routerLocation.pathname, mapCenter, mapZoom]
   );
 
   return (
@@ -587,16 +697,26 @@ const MapPage = () => {
         ) : (
           <MapComponent
             properties={filteredMapProperties}
-            mapCenter={mapCenter} 
+            mapCenter={mapCenter}
             mapZoom={mapZoom}
-            userLocation={userLocation} 
+            userLocation={userLocation}
             selectedProperty={selectedProperty}
             onMarkerClick={onMarkerPropertySelect}
             onMapMove={handleMapMove}
+            route={route}
           />
         )}
         {selectedProperty && (
-          <PropertyInfoPanel selectedProperty={selectedProperty} />
+          <PropertyInfoPanel
+            selectedProperty={selectedProperty}
+            routeStatus={routeStatus}
+            route={route}
+            routeMode={routeMode}
+            onRouteModeChange={setRouteMode}
+            onShowRoute={handleShowRoute}
+            onClearRoute={clearRoute}
+            onViewDetails={handleViewDetails}
+          />
         )}
       </Box>
 

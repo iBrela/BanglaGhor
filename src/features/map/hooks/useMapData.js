@@ -109,7 +109,13 @@ const useMapData = (initialPropertyCode = null) => {
   }, []);
 
   const fetchPropertyByCode = useCallback(
-    async (code) => {
+    // options.preserveCamera: skip this function's own mapCenter/mapZoom
+    // side effect (which normally centers tightly on the property at
+    // zoom 15) - used when restoring a previously-selected property
+    // alongside an already-restored camera position that shouldn't be
+    // overridden (see MapPage's fromMap restoration effect). Default
+    // (undefined/false) behavior is completely unchanged from before.
+    async (code, options = {}) => {
       if (!code) return;
       console.log(`useMapData: Fetching property by code: ${code}`);
       setLoading(true);
@@ -142,11 +148,13 @@ const useMapData = (initialPropertyCode = null) => {
 
         setSelectedProperty(processedProperty);
         prevSelectedIdRef.current = processedProperty._id;
-        setMapCenter([
-          processedProperty.position.lat,
-          processedProperty.position.lng,
-        ]);
-        setMapZoom(15); 
+        if (!options.preserveCamera) {
+          setMapCenter([
+            processedProperty.position.lat,
+            processedProperty.position.lng,
+          ]);
+          setMapZoom(15);
+        }
 
         setProperties((prevProps) => {
           const exists = prevProps.some((p) => p._id === processedProperty._id);
@@ -292,6 +300,26 @@ const useMapData = (initialPropertyCode = null) => {
     }, 300);
   }, []);
 
+  // Restores a previously-saved camera position exactly (e.g. from
+  // MapPage's "fromMap" router state, set right before navigating away to a
+  // property detail page - see MapPage's restoration effect). Deliberately
+  // does NOT touch selectedProperty either way (unlike goToLocation, which
+  // always clears it) - restoring a remembered selection, if any, is the
+  // caller's separate concern (a fetchPropertyByCode(id, {preserveCamera:
+  // true}) call), so the two can be combined or used independently.
+  const restoreMapState = useCallback((center, zoom) => {
+    const normPos = normalizeToLatLngObject(center);
+    if (!normPos) return;
+    isCenteringRef.current = true;
+    setMapCenter([normPos.lat, normPos.lng]);
+    if (typeof zoom === "number" && !isNaN(zoom)) {
+      setMapZoom(zoom);
+    }
+    setTimeout(() => {
+      isCenteringRef.current = false;
+    }, 300);
+  }, []);
+
   const handleMapMove = useCallback((center, zoom) => {
     if (isCenteringRef.current) return; // 
     const normCenter = normalizeToLatLngObject(center);
@@ -313,8 +341,9 @@ const useMapData = (initialPropertyCode = null) => {
     handleSelectProperty,
     clearSelectedProperty,
     goToLocation,
+    restoreMapState,
     handleMapMove,
-    fetchPropertyByCode, 
+    fetchPropertyByCode,
   };
 };
 
