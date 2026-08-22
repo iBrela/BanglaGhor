@@ -1,0 +1,29 @@
+# osmium tags-filter expressions for the M3 Bangladesh POI import.
+# One expression per line. Passed via: osmium tags-filter -e <this file>
+#
+# Must stay in sync with the CATEGORY_RULES in importBangladeshPOIs.js - each
+# line here corresponds to one OR-condition in that file's category mapping.
+# All values verified against the real Bangladesh extract during the M3
+# audit (real OSM tagging conventions, not guessed).
+
+amenity=hospital
+healthcare=hospital
+amenity=clinic
+healthcare=clinic
+amenity=pharmacy
+healthcare=pharmacy
+amenity=school
+amenity=college
+amenity=university
+leisure=park
+amenity=marketplace
+shop=marketplace
+shop=supermarket
+amenity=place_of_worship
+amenity=police
+amenity=fire_station
+amenity=bus_station
+railway=station
+amenity=ferry_terminal
+amenity=bank
+amenity=atm
