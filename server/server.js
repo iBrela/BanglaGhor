@@ -11,6 +11,7 @@ const adminRoutes = require("./routes/adminRoutes");
 const chatRoutes = require("./routes/chatRoutes");
 const locationRoutes = require("./routes/locationRoutes");
 const poiRoutes = require("./routes/poiRoutes");
+const routingRoutes = require("./routes/routingRoutes");
 
 // 2) imports
 const express = require("express");
@@ -30,6 +31,7 @@ app.use("/api/admin", adminRoutes);
 app.use("/api/chat", chatRoutes);
 app.use("/api/locations", locationRoutes);
 app.use("/api/pois", poiRoutes);
+app.use("/api/routing", routingRoutes);
 
 // 4) Connect to DB
 const uri = process.env.MONGO_URI;
