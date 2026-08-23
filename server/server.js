@@ -36,26 +36,47 @@ app.use("/api/routing", routingRoutes);
 app.use("/api/accessibility", accessibilityRoutes);
 
 // 4) Connect to DB
+// No process.exit() here: this module is also require()'d directly by the
+// Netlify Functions handler (server/netlify/functions/api.js), so exiting
+// the process on a connection problem would kill that serverless
+// invocation rather than just failing the current request. Failures are
+// logged instead, and existing per-request DB calls already surface their
+// own errors (e.g. Mongoose's buffering timeout) through normal
+// controller error handling.
 const uri = process.env.MONGO_URI;
-if (!uri) {
-  console.error("No Mongo URI found in ENV! Check your .env name.");
-  process.exit(1);
-}
-mongoose
-  .connect(uri, {
-    useNewUrlParser: true,
-    useUnifiedTopology: true,
-  })
-  .then(() => {
-    console.log("✅ Connected to MongoDB Atlas successfully!");
-  })
-  .catch((err) => {
-    console.error("❌ Error connecting to MongoDB Atlas:", err);
-    process.exit(1);
-  });
+
+const connectToDatabase = () => {
+  if (!uri) {
+    console.error(
+      "No Mongo URI found in ENV! Check your .env name. Routes that need the database will fail until MONGO_URI is set."
+    );
+    return;
+  }
+
+  // Guard against re-connecting an already-connected/connecting instance,
+  // in case this module ends up require()'d more than once in the same
+  // process (e.g. a reused warm serverless container).
+  if (mongoose.connection.readyState !== 0) {
+    return;
+  }
+
+  mongoose
+    .connect(uri, {
+      useNewUrlParser: true,
+      useUnifiedTopology: true,
+    })
+    .then(() => {
+      console.log("✅ Connected to MongoDB Atlas successfully!");
+    })
+    .catch((err) => {
+      console.error("❌ Error connecting to MongoDB Atlas:", err.message);
+    });
+};
+
+connectToDatabase();
 
 mongoose.connection.on("error", (err) => {
-  console.error("❌ MongoDB connection error (post-startup):", err);
+  console.error("❌ MongoDB connection error (post-startup):", err.message);
 });
 
 // 5) MODELS (Ensure UserProfile is defined in its file)

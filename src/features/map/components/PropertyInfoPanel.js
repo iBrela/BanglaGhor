@@ -33,6 +33,7 @@ import DirectionsBikeIcon from "@mui/icons-material/DirectionsBike";
 import CloseIcon from "@mui/icons-material/Close";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { getPropertyCoordinates } from "../../../shared/propertyLocation";
 
 /**
  * Helper to format price with consistent display
@@ -44,33 +45,6 @@ const formatDisplayPrice = (price, listingType) => {
   return `৳ ${numericPrice.toLocaleString()}${
     listingType === "rent" ? "/mo" : ""
   }`;
-};
-
-/**
- * Get position data from a property object in a standard format
- */
-const getPropertyPosition = (property) => {
-  if (!property) return null;
-  
-
-  if (property.position && 
-      typeof property.position.lat === 'number' && 
-      typeof property.position.lng === 'number') {
-    return {
-      lat: property.position.lat,
-      lng: property.position.lng
-    };
-  }
-  
-  if (typeof property.latitude === 'number' && 
-      typeof property.longitude === 'number') {
-    return {
-      lat: property.latitude,
-      lng: property.longitude
-    };
-  }
-  
-  return null;
 };
 
 /**
@@ -95,23 +69,6 @@ const constructLocationString = (property) => {
   return locationParts.length > 0 
     ? locationParts.join(", ") 
     : "Location details not available";
-};
-
-/**
- * Function to normalize position coordinates
- */
-const normalizePosition = (position) => {
-  if (!position) return null;
-  if (typeof position === 'object') {
-    if (typeof position.lat === 'number' && typeof position.lng === 'number') {
-      return {
-        lat: parseFloat(position.lat.toFixed(6)),
-        lng: parseFloat(position.lng.toFixed(6))
-      };
-    }
-  }
-  
-  return null;
 };
 
 /**
@@ -215,8 +172,7 @@ const PropertyInfoPanel = ({
     selectedProperty.listingType || selectedProperty.mode
   );
   
-  const positionData = getPropertyPosition(selectedProperty);
-  const stablePosition = positionData ? normalizePosition(positionData) : null;
+  const stablePosition = getPropertyCoordinates(selectedProperty);
 
   
   const locationAccuracy = selectedProperty.locationAccuracy || "unknown";

@@ -63,6 +63,7 @@ import { useAuth } from "../../../context/AuthContext";
 import useWishlist from "./../hooks/useWishlist";
 import { initiateOrGetConversation } from "../../chat/services/chatService";
 import { useSnackbar } from "../../../context/SnackbarContext";
+import { getPropertyCoordinates } from "../../../shared/propertyLocation";
  
 const API_BASE_URL =
   process.env.REACT_APP_API_URL || "http://localhost:5001/api";
@@ -89,24 +90,6 @@ const formatFeatureText = (value, t) => {
     return value.charAt(0).toUpperCase() + value.slice(1);
   }
   return value ?? "N/A";
-};
- 
-const getPropertyPosition = (property) => {
-  if (!property) return null;
-  if (
-    property.position &&
-    typeof property.position.lat === "number" &&
-    typeof property.position.lng === "number"
-  ) {
-    return { lat: property.position.lat, lng: property.position.lng };
-  }
-  if (
-    typeof property.latitude === "number" &&
-    typeof property.longitude === "number"
-  ) {
-    return { lat: property.latitude, lng: property.longitude };
-  }
-  return null;
 };
  
 const constructLocationString = (property) => {
@@ -209,7 +192,7 @@ const PropertyDetailPage = () => {
       if (response.data) {
         const fetchedProperty = response.data;
         setSelectedImageIndex(0);
-        const positionData = getPropertyPosition(fetchedProperty);
+        const positionData = getPropertyCoordinates(fetchedProperty);
         if (!positionData) {
           fetchedProperty.position = {
             lat: 23.8103 + (Math.random() * 0.1 - 0.05),

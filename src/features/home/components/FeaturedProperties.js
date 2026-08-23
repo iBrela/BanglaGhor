@@ -20,7 +20,7 @@ const API_BASE_URL =
 const FeaturedProperties = () => {
   const navigate = useNavigate();
   const { t } = useTranslation();
-  const { isLoggedIn, user } = useAuth();
+  const { isLoggedIn, user, idToken } = useAuth();
   const [properties, setProperties] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -54,10 +54,11 @@ const FeaturedProperties = () => {
 
   useEffect(() => {
     const fetchWishlist = async () => {
-      if (isLoggedIn && user?.email) {
+      if (isLoggedIn && user?.email && idToken) {
         try {
           const response = await axios.get(
-            `${API_BASE_URL}/users/${user.email}/wishlist`
+            `${API_BASE_URL}/users/${user.email}/wishlist`,
+            { headers: { Authorization: `Bearer ${idToken}` } }
           );
           setWishlist(response.data.wishlist.map((item) => item._id || item));
         } catch (error) {
@@ -68,10 +69,10 @@ const FeaturedProperties = () => {
       }
     };
     fetchWishlist();
-  }, [isLoggedIn, user]);
+  }, [isLoggedIn, user, idToken]);
 
   const toggleWishlist = async (propertyId) => {
-    if (!isLoggedIn || !user?.email) {
+    if (!isLoggedIn || !user?.email || !idToken) {
       navigate("/login");
       return;
     }
@@ -82,12 +83,15 @@ const FeaturedProperties = () => {
       if (isInWishlist) {
         await axios.delete(`${API_BASE_URL}/users/${username}/wishlist`, {
           data: { propertyId },
+          headers: { Authorization: `Bearer ${idToken}` },
         });
         updatedWishlist = wishlist.filter((id) => id !== propertyId);
       } else {
-        await axios.post(`${API_BASE_URL}/users/${username}/wishlist`, {
-          propertyId,
-        });
+        await axios.post(
+          `${API_BASE_URL}/users/${username}/wishlist`,
+          { propertyId },
+          { headers: { Authorization: `Bearer ${idToken}` } }
+        );
         updatedWishlist = [...wishlist, propertyId];
       }
       setWishlist(updatedWishlist);

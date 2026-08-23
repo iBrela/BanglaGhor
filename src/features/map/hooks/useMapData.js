@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import axios from "axios";
-import { divisionCenters } from "../../../constants/divisionCenters";
 import { isWithinBangladesh } from "../bangladeshBounds";
+import { getPropertyDisplayCoordinates } from "../../../shared/propertyLocation";
 
 const API_BASE_URL =
   process.env.REACT_APP_API_URL || "http://localhost:5001/api";
@@ -31,51 +31,6 @@ const normalizeToLatLngObject = (positionInput) => {
   return null;
 };
 
-const getProcessedPositionAndAccuracy = (property) => {
-  if (!property) return { position: null, accuracy: "unknown" };
-
-  let pos = null;
-  let acc = property.locationAccuracy || "unknown";
-
-  
-  if (
-    property.position &&
-    typeof property.position.lat === "number" &&
-    typeof property.position.lng === "number"
-  ) {
-    pos = { lat: property.position.lat, lng: property.position.lng };
-    if (acc === "unknown" && property.locationAccuracy)
-      acc = property.locationAccuracy; 
-    else if (acc === "unknown") acc = "precise";
-  }
-  
-  else if (
-    typeof property.latitude === "number" &&
-    typeof property.longitude === "number"
-  ) {
-    pos = { lat: property.latitude, lng: property.longitude };
-    if (acc === "unknown" && property.locationAccuracy)
-      acc = property.locationAccuracy;
-    else if (acc === "unknown") acc = "precise";
-  }
-
-  else {
-    const lowerDistrict = property.district?.toLowerCase() || "";
-    const lowerDivision = property.division?.toLowerCase() || ""; 
-    const fallbackKey = Object.keys(divisionCenters).find(
-      (key) => lowerDistrict.includes(key) || lowerDivision.includes(key)
-    );
-    if (fallbackKey) {
-      const coords = divisionCenters[fallbackKey];
-      pos = { lat: coords[0], lng: coords[1] };
-      acc = "district-level"; 
-    }
-  }
-
-  const normalizedPos = pos ? normalizeToLatLngObject(pos) : null;
-  return { position: normalizedPos, accuracy: normalizedPos ? acc : "unknown" };
-};
-
 const useMapData = (initialPropertyCode = null) => {
   const [properties, setProperties] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -91,9 +46,9 @@ const useMapData = (initialPropertyCode = null) => {
   const createStableProperty = useCallback((property) => {
     if (!property || !property._id) return null;
     const stableProp = { ...property };
-    const { position, accuracy } = getProcessedPositionAndAccuracy(stableProp);
+    const { position, accuracy } = getPropertyDisplayCoordinates(stableProp);
 
-    stableProp.position = position; 
+    stableProp.position = position;
     stableProp.locationAccuracy = accuracy;
 
     

@@ -474,6 +474,39 @@ exports.getPropertyById = async (req, res) => {
   }
 };
 
+// Fields a property owner (or an admin acting through this same endpoint -
+// admin moderation actions like feature/approve/hide/soft-delete go through
+// their own dedicated routes in adminController.js, never this one) may
+// directly set via PUT /api/properties/:id. Deliberately excludes:
+// - system/ownership fields: _id, createdBy, createdAt, updatedAt, __v
+// - admin-only moderation fields: isHidden, featuredAt, isDeleted,
+//   deletedAt, deletedBy (all managed exclusively by adminController.js)
+// - geocoding-derived fields: latitude, longitude, position,
+//   locationAccuracy, geocodedAddress, geoLocation - these are computed
+//   below by geocodeAddress() when an address field changes, or via the
+//   separate updatePropertyCoordinates endpoint - never accepted directly
+//   from the client.
+const OWNER_EDITABLE_PROPERTY_FIELDS = [
+  "title",
+  "price",
+  "addressLine1",
+  "addressLine2",
+  "cityTown",
+  "upazila",
+  "district",
+  "postalCode",
+  "propertyType",
+  "listingType",
+  "listingStatus",
+  "bedrooms",
+  "bathrooms",
+  "area",
+  "features",
+  "bangladeshDetails",
+  "description",
+  "images",
+];
+
 exports.updateProperty = async (req, res) => {
   try {
     const propertyId = req.params.id;
@@ -505,7 +538,12 @@ exports.updateProperty = async (req, res) => {
       (field) => field in req.body
     );
 
-    let updatedFields = { ...req.body };
+    let updatedFields = {};
+    for (const field of OWNER_EDITABLE_PROPERTY_FIELDS) {
+      if (field in req.body) {
+        updatedFields[field] = req.body[field];
+      }
+    }
 
     if (addressFieldsUpdated) {
       const addressDataForUpdate = {
@@ -521,28 +559,56 @@ exports.updateProperty = async (req, res) => {
         "Address fields updated. Re-geocoding with:",
         addressDataForUpdate
       );
+
+      let geocodeResult = null;
       try {
-        const geocodeResult = await geocodeAddress(addressDataForUpdate);
-        if (geocodeResult) {
-          updatedFields.latitude = geocodeResult.latitude;
-          updatedFields.longitude = geocodeResult.longitude;
-          updatedFields.position = geocodeResult.position;
-          updatedFields.locationAccuracy = geocodeResult.locationAccuracy;
-          updatedFields.geocodedAddress = geocodeResult.geocodedAddress;
-          console.log(
-            `Geocoded updated address to: ${geocodeResult.latitude}, ${geocodeResult.longitude} (accuracy: ${geocodeResult.locationAccuracy})`
-          );
-        } else {
-          console.warn(
-            `Geocoding failed for updated address. Coordinates might not be updated or will use fallback.`
-          );
-        }
+        geocodeResult = await geocodeAddress(addressDataForUpdate);
       } catch (geocodeError) {
         console.error(
           "Error during geocoding for update:",
           geocodeError.message
         );
       }
+
+      if (!geocodeResult) {
+        // geocodeAddress() only returns null when the OpenCage API call
+        // itself fails (network/auth/rate-limit) - a "no results" address
+        // already gets a district-level fallback inside geocodeAddress()
+        // itself. Fall back the same way createProperty() does on total
+        // failure, so the new address text is never left paired with the
+        // old, unrelated coordinates from before this edit.
+        console.warn(
+          "Geocoding failed for updated address. Using district-level fallback coordinates."
+        );
+        const districtCoordinates = getDistrictCoordinates(
+          addressDataForUpdate.district
+        );
+        const fallback = districtCoordinates || { lat: 23.8103, lng: 90.4125 };
+        geocodeResult = {
+          latitude: fallback.lat,
+          longitude: fallback.lng,
+          position: { lat: fallback.lat, lng: fallback.lng },
+          locationAccuracy: districtCoordinates ? "district-level" : "unknown",
+          geocodedAddress: constructGeocodingAddress(addressDataForUpdate),
+        };
+      }
+
+      // findByIdAndUpdate() does not run document pre-save middleware, so
+      // geoLocation (the GeoJSON field M5's accessibility endpoints and the
+      // chatbot's geo queries actually read) must be set explicitly here -
+      // it will not be synchronized automatically the way it is on create().
+      updatedFields.latitude = geocodeResult.latitude;
+      updatedFields.longitude = geocodeResult.longitude;
+      updatedFields.position = geocodeResult.position;
+      updatedFields.locationAccuracy = geocodeResult.locationAccuracy;
+      updatedFields.geocodedAddress = geocodeResult.geocodedAddress;
+      updatedFields.geoLocation = {
+        type: "Point",
+        coordinates: [geocodeResult.longitude, geocodeResult.latitude],
+      };
+      console.log(
+        `Geocoded updated address to: ${geocodeResult.latitude}, ${geocodeResult.longitude} (accuracy: ${geocodeResult.locationAccuracy})`
+      );
     }
 
     const updatedProperty = await Property.findByIdAndUpdate(

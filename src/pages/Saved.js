@@ -17,7 +17,7 @@ const API_BASE_URL =
   process.env.REACT_APP_API_URL || "http://localhost:5001/api";
 
 const Saved = () => {
-  const { isLoggedIn, user } = useAuth();
+  const { isLoggedIn, user, idToken } = useAuth();
   const [savedProperties, setSavedProperties] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -28,12 +28,13 @@ const Saved = () => {
   });
 
   const fetchSavedProperties = useCallback(async () => {
-    if (isLoggedIn && user?.email) {
+    if (isLoggedIn && user?.email && idToken) {
       setLoading(true);
       setError(null);
       try {
         const response = await axios.get(
-          `${API_BASE_URL}/users/${user.email}/wishlist`
+          `${API_BASE_URL}/users/${user.email}/wishlist`,
+          { headers: { Authorization: `Bearer ${idToken}` } }
         );
         if (response.data && Array.isArray(response.data.wishlist)) {
           setSavedProperties(response.data.wishlist);
@@ -55,17 +56,18 @@ const Saved = () => {
       setSavedProperties([]);
       setLoading(false);
     }
-  }, [isLoggedIn, user]);
+  }, [isLoggedIn, user, idToken]);
 
   useEffect(() => {
     fetchSavedProperties();
   }, [fetchSavedProperties]);
 
   const handleRemoveFromWishlist = async (propertyId) => {
-    if (!user?.email || !propertyId) return;
+    if (!user?.email || !propertyId || !idToken) return;
     try {
       await axios.delete(`${API_BASE_URL}/users/${user.email}/wishlist`, {
         data: { propertyId },
+        headers: { Authorization: `Bearer ${idToken}` },
       });
       setSavedProperties((prev) => prev.filter((p) => p._id !== propertyId));
       setSnackbar({

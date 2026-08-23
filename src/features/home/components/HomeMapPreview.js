@@ -13,7 +13,8 @@ import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import axios from "axios";
 import MapComponent from "../../map/components/MapComponent";
- 
+import { getPropertyCoordinates } from "../../../shared/propertyLocation";
+
 const API_BASE_URL =
   process.env.REACT_APP_API_URL || "http://localhost:5001/api";
  
@@ -39,11 +40,9 @@ const HomeMapPreview = () => {
         const mappableProperties = (response.data || [])
           .map((prop) => {
             const property = prop.toObject ? prop.toObject() : prop;
-            if (!property.position && property.latitude && property.longitude) {
-              property.position = {
-                lat: property.latitude,
-                lng: property.longitude,
-              };
+            const coords = getPropertyCoordinates(property);
+            if (coords) {
+              property.position = coords;
             }
             return property;
           })

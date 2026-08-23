@@ -11,20 +11,21 @@ const API_BASE_URL =
  * Returns wishlist IDs and functions to interact with it.
  */
 const useWishlist = () => {
-  const { isLoggedIn, user } = useAuth();
+  const { isLoggedIn, user, idToken } = useAuth();
   const navigate = useNavigate();
   const [wishlistIds, setWishlistIds] = useState(new Set());
   const [loadingWishlist, setLoadingWishlist] = useState(false);
   const [wishlistError, setWishlistError] = useState(null);
 
   const fetchWishlistIds = useCallback(async () => {
-    if (isLoggedIn && user?.email) {
+    if (isLoggedIn && user?.email && idToken) {
       setLoadingWishlist(true);
       setWishlistError(null);
       try {
         console.log(`Fetching wishlist for ${user.email}`); // Debug log
         const response = await axios.get(
-          `${API_BASE_URL}/users/${user.email}/wishlist`
+          `${API_BASE_URL}/users/${user.email}/wishlist`,
+          { headers: { Authorization: `Bearer ${idToken}` } }
         );
         if (response.data && Array.isArray(response.data.wishlist)) {
           const ids = response.data.wishlist.map((item) => item?._id || item); 
@@ -47,9 +48,9 @@ const useWishlist = () => {
     } else {
       setWishlistIds(new Set()); 
     }
-  }, [isLoggedIn, user]); 
+  }, [isLoggedIn, user, idToken]);
 
-  
+
   useEffect(() => {
     fetchWishlistIds();
   }, [fetchWishlistIds]); 
@@ -61,7 +62,7 @@ const useWishlist = () => {
    */
   const toggleWishlist = useCallback(
     async (propertyId, callback) => {
-      if (!isLoggedIn || !user?.email) {
+      if (!isLoggedIn || !user?.email || !idToken) {
         // Optionally provide feedback before redirecting
         if (callback) callback("Please log in to save properties", "warning");
         navigate("/login");
@@ -94,16 +95,19 @@ const useWishlist = () => {
         if (isInWishlist) {
           console.log(`Removing ${propertyId} for ${username}`); // Debug log
           await axios.delete(`${API_BASE_URL}/users/${username}/wishlist`, {
-            data: { propertyId }, 
+            data: { propertyId },
+            headers: { Authorization: `Bearer ${idToken}` },
           });
           console.log(`Removed ${propertyId} successfully`); // Debug log
           if (callback) callback("Removed from wishlist", "info");
         } else {
           // --- Add to Wishlist ---
           console.log(`Adding ${propertyId} for ${username}`); // Debug log
-          await axios.post(`${API_BASE_URL}/users/${username}/wishlist`, {
-            propertyId,
-          });
+          await axios.post(
+            `${API_BASE_URL}/users/${username}/wishlist`,
+            { propertyId },
+            { headers: { Authorization: `Bearer ${idToken}` } }
+          );
           console.log(`Added ${propertyId} successfully`);
           if (callback) callback("Added to wishlist", "success");
         }
@@ -117,7 +121,7 @@ const useWishlist = () => {
           callback("Failed to update wishlist. Please try again.", "error");
       }
     },
-    [isLoggedIn, user, navigate, wishlistIds]
+    [isLoggedIn, user, idToken, navigate, wishlistIds]
   );
 
   const refreshWishlist = useCallback(() => {
