@@ -24,6 +24,7 @@
     "date-fns": "^4.1.0",
     "dotenv": "^16.5.0",
     "express": "^4.21.2",
+    "express-rate-limit": "^8.6.2",
     "express-validator": "^7.2.1",
     "groq-sdk": "^1.1.2",
     "helmet": "^8.3.0",
