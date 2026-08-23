@@ -154,8 +154,15 @@ const PropertyCard = ({ property, isWishlisted, onWishlistToggle }) => {
             />
           )}
  
-          {/* Status badge — only when not available */}
-          {property.listingStatus && property.listingStatus !== "available" && (
+          {/* Status badge — only when not available, and not when it would
+              duplicate the listing-type badge above (which already reads
+              "Sold" when listingType === "sold" - a property can also have
+              listingStatus === "sold" independently, e.g. a "Buy" listing
+              marked sold, where this badge is still the only Sold
+              indicator and must keep rendering). */}
+          {property.listingStatus &&
+            property.listingStatus !== "available" &&
+            !(property.listingType === "sold" && property.listingStatus === "sold") && (
             <Chip
               icon={statusChipIcon}
               label={statusLabel}
