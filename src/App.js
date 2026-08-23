@@ -142,6 +142,7 @@ function App() {
                   <Route path="/signup" element={<Signup />} />
                   <Route path="/verify-otp" element={<VerifyOtp />} />
                   <Route path="/forgot-password" element={<ForgotPassword />} />
+                  <Route path="/change-password" element={<ChangePassword />} />
                   <Route path="/list-property" element={<ListProperty />} />
                 </Route>
 
