@@ -148,11 +148,18 @@ app.get("/", (req, res) => {
   res.send("Hello from the backend server! MongoDB connection is active.");
 });
 
-// // 7) Start Server
+// 7) Start Server - only when this file is run directly (`node server.js`),
+// never when it's require()'d as a module. server/netlify/functions/api.js
+// requires this file to get `app` for serverless-http, which only needs the
+// Express app itself, not a listening TCP server - without this guard,
+// importing the app in that serverless context would also bind a port for
+// no purpose every cold start.
 const PORT = process.env.PORT || 5001;
 
-app.listen(PORT, () => {
-  console.log(`Server listening on port ${PORT}`);
-});//  🎉  This has been commented out for deployment on Netlify 🎉
+if (require.main === module) {
+  app.listen(PORT, () => {
+    console.log(`Server listening on port ${PORT}`);
+  });
+}
 
 module.exports = { app };
