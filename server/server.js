@@ -20,7 +20,37 @@ const mongoose = require("mongoose");
 const cors = require("cors");
 
 const app = express();
-app.use(cors());
+
+// Comma-separated list of browser origins allowed to call this API - see
+// server/.env.example. Defaults to the local CRA dev origin (this app's
+// package.json "proxy" only covers same-origin dev requests; many hooks in
+// src/ call REACT_APP_API_URL/localhost:5001 directly, which is a genuine
+// cross-origin browser request in local dev, so it must stay allowed here).
+// No production origin is hardcoded - it must be set via ALLOWED_ORIGINS.
+const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || "http://localhost:3000")
+  .split(",")
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      // No Origin header - curl, server-to-server calls, health checks,
+      // this project's own smoke tests. No browser same-origin policy
+      // applies to these, so allow them through rather than breaking
+      // legitimate non-browser callers.
+      if (!origin || ALLOWED_ORIGINS.includes(origin)) {
+        callback(null, true);
+        return;
+      }
+      // Unapproved browser origin: withhold CORS headers instead of
+      // throwing, so the request still completes normally server-side and
+      // it's the browser - not this server - that blocks the response. No
+      // error, no internal details returned, no crash risk.
+      callback(null, false);
+    },
+  })
+);
 app.use(express.json());
 
 // 3) API Routes
