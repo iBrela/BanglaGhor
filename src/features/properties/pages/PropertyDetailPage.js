@@ -63,7 +63,7 @@ import { useAuth } from "../../../context/AuthContext";
 import useWishlist from "./../hooks/useWishlist";
 import { initiateOrGetConversation } from "../../chat/services/chatService";
 import { useSnackbar } from "../../../context/SnackbarContext";
-import { getPropertyCoordinates } from "../../../shared/propertyLocation";
+import { getPropertyDisplayCoordinates } from "../../../shared/propertyLocation";
  
 const API_BASE_URL =
   process.env.REACT_APP_API_URL || "http://localhost:5001/api";
@@ -192,16 +192,18 @@ const PropertyDetailPage = () => {
       if (response.data) {
         const fetchedProperty = response.data;
         setSelectedImageIndex(0);
-        const positionData = getPropertyCoordinates(fetchedProperty);
-        if (!positionData) {
-          fetchedProperty.position = {
-            lat: 23.8103 + (Math.random() * 0.1 - 0.05),
-            lng: 90.4125 + (Math.random() * 0.1 - 0.05),
-          };
-          if (!fetchedProperty.locationAccuracy) {
-            fetchedProperty.locationAccuracy = "approximate";
-          }
-        }
+        // Deterministic: real coordinates when available, otherwise the
+        // same district/division display fallback useMapData uses (never a
+        // random/invented point) - see src/shared/propertyLocation.js.
+        // property.position is not currently rendered anywhere on this
+        // page (handleOpenMap below navigates to /map/:id, which computes
+        // its own display coordinates independently), but locationAccuracy
+        // IS shown to the user (warning banner/badge/detail row further
+        // down), so it must reflect reality rather than a fabricated
+        // "approximate".
+        const display = getPropertyDisplayCoordinates(fetchedProperty);
+        fetchedProperty.position = display.position;
+        fetchedProperty.locationAccuracy = display.accuracy;
         setProperty(fetchedProperty);
       } else {
         setError("Property not found.");

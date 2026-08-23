@@ -129,15 +129,40 @@ const MapPage = () => {
   // when available, so a second click doesn't re-prompt geolocation; the
   // hook itself falls back to a fresh geolocation request when there isn't
   // one yet.
+  const showNotification = useCallback((message, severity = "info") => {
+    setNotification({ open: true, message, severity });
+  }, []);
+
   const handleShowRoute = useCallback(() => {
     if (!selectedProperty?.position) return;
+    // selectedProperty.position may be a district/division DISPLAY fallback
+    // (see useMapData's getPropertyDisplayCoordinates) rather than the
+    // property's real geocoded location - routing to that centroid would
+    // look like a real, precise route to the property, which it isn't.
+    if (selectedProperty.locationAccuracy === "district-level") {
+      showNotification(
+        t(
+          "route_unavailable_district_level",
+          "Exact property location is unavailable, so a route cannot be calculated."
+        ),
+        "warning"
+      );
+      return;
+    }
     showRouteToDestination(
       selectedProperty.position.lat,
       selectedProperty.position.lng,
       routeMode,
       userLocation
     );
-  }, [selectedProperty, routeMode, userLocation, showRouteToDestination]);
+  }, [
+    selectedProperty,
+    routeMode,
+    userLocation,
+    showRouteToDestination,
+    showNotification,
+    t,
+  ]);
 
   // A route to a property that's no longer selected (switched to another
   // property, or deselected) would just be confusing - clear it
@@ -245,10 +270,7 @@ const MapPage = () => {
     } else if (propertyCode && !loading && !selectedProperty) {
       
     }
-  }, [propertyCode, selectedProperty, loading, t]); 
-  const showNotification = useCallback((message, severity = "info") => {
-    setNotification({ open: true, message, severity });
-  }, []);
+  }, [propertyCode, selectedProperty, loading, t]);
 
   const filteredMapProperties = useMemo(() => {
     let propsToFilter = Array.isArray(allMappableProperties)
