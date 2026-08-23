@@ -61,11 +61,12 @@ const useLogin = () => {
         console.error("Login error:", err);
 
         if (err.message === "New password required.") {
-          //
-          localStorage.setItem("pendingChangePasswordEmail", email);
-          localStorage.setItem("pendingChangePasswordTempPassword", password);
+          // Pass only the (non-sensitive) email through React Router's
+          // in-memory navigation state - the temporary password is never
+          // persisted client-side; the user re-enters it on the
+          // change-password page's existing "Temporary Password" field.
           navigatedToChangePassword = true;
-          navigate("/change-password");
+          navigate("/change-password", { state: { email } });
           return;
         }
 

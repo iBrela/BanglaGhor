@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { useAuth } from "../../../context/AuthContext";
 import { CognitoUser, AuthenticationDetails } from "amazon-cognito-identity-js";
 import { userPool } from "../../../aws/CognitoConfig";
@@ -11,6 +11,7 @@ import { userPool } from "../../../aws/CognitoConfig";
  */
 const useChangePassword = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const { login } = useAuth();
 
   // State for form fields
@@ -25,18 +26,32 @@ const useChangePassword = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [openSnackbar, setOpenSnackbar] = useState(false);
 
-  // Retrieve email and temporary password from localStorage on mount
+  // Retrieve the (non-sensitive) email from React Router's in-memory
+  // navigation state - see useLogin.js's navigate("/change-password",
+  // { state: { email } }). The temporary password is never persisted
+  // anywhere client-side; the user re-enters it on this page's existing
+  // "Temporary Password" field (see ChangePasswordForm.js). Note:
+  // history.state (and so location.state) is preserved by the browser
+  // across a same-entry reload - only the email survives a refresh this
+  // way, never the password, since temporaryPassword is plain component
+  // state that's reset whenever the app reinitializes. If email is
+  // missing entirely (direct visit with no history, or a cleared/expired
+  // entry), safely restart at /login rather than trying to recover it.
   useEffect(() => {
-    const storedEmail = localStorage.getItem("pendingChangePasswordEmail");
-    const storedTempPassword = localStorage.getItem("pendingChangePasswordTempPassword");
-    if (storedEmail && storedTempPassword) {
-      setEmail(storedEmail);
-      setTemporaryPassword(storedTempPassword);
+    // One-time defensive cleanup: purge any stale values a browser might
+    // still be holding from the previous (pre-Fix #10) implementation,
+    // which stored the temporary password in localStorage.
+    localStorage.removeItem("pendingChangePasswordEmail");
+    localStorage.removeItem("pendingChangePasswordTempPassword");
+
+    const stateEmail = location.state?.email;
+    if (stateEmail) {
+      setEmail(stateEmail);
     } else {
-      setError("Missing email or temporary password. Please try logging in again.");
+      setError("Missing email. Please try logging in again.");
       navigate("/login");
     }
-  }, [navigate]);
+  }, [location.state, navigate]);
 
   /**
    * Handles changes in the name input field.
@@ -161,8 +176,6 @@ const useChangePassword = () => {
             {
               onSuccess: async () => {
                 console.log("Password changed successfully");
-                localStorage.removeItem("pendingChangePasswordEmail");
-                localStorage.removeItem("pendingChangePasswordTempPassword");
                 await login(email, newPassword);
                 setOpenSnackbar(true);
                 setTimeout(() => {
