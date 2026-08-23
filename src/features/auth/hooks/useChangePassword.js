@@ -32,7 +32,6 @@ const useChangePassword = () => {
     if (storedEmail && storedTempPassword) {
       setEmail(storedEmail);
       setTemporaryPassword(storedTempPassword);
-      console.log("Retrieved from localStorage:", { storedEmail, storedTempPassword });
     } else {
       setError("Missing email or temporary password. Please try logging in again.");
       navigate("/login");
@@ -55,7 +54,6 @@ const useChangePassword = () => {
   const handleTemporaryPasswordChange = useCallback((event) => {
     const value = event.target.value;
     setTemporaryPassword(value);
-    console.log("Temporary password input changed to:", value);
     if (error) setError("");
   }, [error]);
 
@@ -65,7 +63,6 @@ const useChangePassword = () => {
   const handleNewPasswordChange = useCallback((event) => {
     const value = event.target.value;
     setNewPassword(value);
-    console.log("New password input changed to:", value);
     if (error) setError("");
   }, [error]);
 
@@ -75,7 +72,6 @@ const useChangePassword = () => {
   const handleConfirmPasswordChange = useCallback((event) => {
     const value = event.target.value;
     setConfirmPassword(value);
-    console.log("Confirm password input changed to:", value);
     if (error) setError("");
   }, [error]);
 
@@ -88,13 +84,6 @@ const useChangePassword = () => {
     async (e) => {
       e.preventDefault();
       setError("");
-
-      console.log("Form submitted with values:", {
-        name,
-        temporaryPassword,
-        newPassword,
-        confirmPassword,
-      });
 
       if (!name) {
         setError("Please enter your name.");
@@ -146,7 +135,7 @@ const useChangePassword = () => {
               reject(new Error("Unexpected success during temporary password authentication."));
             },
             onFailure: (err) => {
-              console.error("Authentication failure:", err);
+              console.error("Authentication failure:", err.code || err.message);
               if (err.code === "NotAuthorizedException") {
                 reject(new Error("Incorrect temporary password."));
               } else {
@@ -182,7 +171,7 @@ const useChangePassword = () => {
                 resolve();
               },
               onFailure: (err) => {
-                console.error("Password change failed:", err);
+                console.error("Password change failed:", err.code || err.message);
                 if (err.code === "InvalidPasswordException") {
                   reject(
                     new Error(
@@ -203,7 +192,7 @@ const useChangePassword = () => {
           );
         });
       } catch (err) {
-        console.error("Change password error:", err);
+        console.error("Change password error:", err.code || err.message);
         const message =
           err.message || "Failed to change password. Please try again.";
         setError(message);
@@ -239,7 +228,6 @@ const useChangePassword = () => {
     handleCloseSnackbar,
   };
 
-  console.log("useChangePassword returning:", hookReturn);
   return hookReturn;
 };
 
