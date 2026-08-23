@@ -19,8 +19,35 @@ const contactRoutes = require("./routes/contactRoutes");
 const express = require("express");
 const mongoose = require("mongoose");
 const cors = require("cors");
+const helmet = require("helmet");
 
 const app = express();
+
+// Safe HTTP security headers. This server never sends the React HTML
+// document (see netlify.toml - the frontend is built and served separately
+// by Netlify's static hosting; this Express app only ever answers /api/*
+// JSON requests, confirmed by there being no express.static/sendFile/HTML
+// response anywhere in this codebase). Content-Security-Policy protects a
+// rendered HTML document (inline scripts, image/connect/frame sources,
+// etc.) - since this server doesn't serve that document, a CSP header here
+// would apply only to JSON API responses, where it provides no real
+// protection while adding real risk of misconfiguration against this
+// project's external integrations (MapLibre/PMTiles, Cognito, Ably, S3
+// property images). Left disabled here; if the frontend's own document
+// ever needs a CSP, it belongs wherever that HTML is actually served
+// (Netlify headers config), not here.
+// HSTS: only meaningful over HTTPS. Local dev runs plain HTTP - Helmet
+// would otherwise still send Strict-Transport-Security, which browsers
+// mostly ignore over HTTP but which has no purpose there. Enabled only
+// when NODE_ENV=production (Netlify Functions sets this automatically),
+// matching how TLS termination actually happens (Netlify's edge, not this
+// app) - never assumes local development is HTTPS.
+app.use(
+  helmet({
+    contentSecurityPolicy: false,
+    hsts: process.env.NODE_ENV === "production" ? {} : false,
+  })
+);
 
 // Comma-separated list of browser origins allowed to call this API - see
 // server/.env.example. Defaults to the local CRA dev origin (this app's
