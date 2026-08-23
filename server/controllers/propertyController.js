@@ -179,6 +179,15 @@ const geocodeAddress = async (addressData) => {
           no_annotations: 0,
           abbrv: 1,
         },
+        // Without this, a slow/hanging OpenCage request had no bound and
+        // could stall property create/update indefinitely. 8s matches
+        // routingService.js's own REQUEST_TIMEOUT_MS for a similar
+        // external geo-dependency call. On timeout, axios rejects the same
+        // way as any other request failure, so the existing catch block
+        // below (which already returns null -> triggers the district-level
+        // fallback in createProperty/updateProperty) handles it exactly
+        // like any other geocoding failure - no new fallback logic needed.
+        timeout: 8000,
       }
     );
 
