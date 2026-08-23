@@ -1,5 +1,8 @@
 import { useState, useCallback } from "react";
+import axios from "axios";
 
+const API_BASE_URL =
+  process.env.REACT_APP_API_URL || "http://localhost:5001/api";
 
 /**
  * @hook useContactForm
@@ -98,23 +101,21 @@ const useContactForm = () => {
       }
 
       setIsSubmitting(true);
-      setSnackbar((prev) => ({ ...prev, open: false })); 
+      setSnackbar((prev) => ({ ...prev, open: false }));
 
-      console.log("Submitting form data:", formData);
-
-      // --- Simulate API Call ---
       try {
-        await new Promise((resolve) => setTimeout(resolve, 1500));
-        console.log("Mock submission successful.");
+        const response = await axios.post(`${API_BASE_URL}/contact`, formData);
 
         // Show success message
         setSnackbar({
           open: true,
           severity: "success",
-          message: "Thank you for contacting us! We will get back to you soon.",
+          message:
+            response.data?.message ||
+            "Thank you for contacting us! We will get back to you soon.",
         });
 
-        // Reset form fields
+        // Reset form fields - only on confirmed backend success.
         setFormData({
           name: "",
           email: "",
@@ -124,15 +125,17 @@ const useContactForm = () => {
         });
         setFormErrors({}); // Clear errors on success
       } catch (error) {
-        console.error("Submission error:", error);
-        // Show error message
+        // Entered data is intentionally left in place on failure so the
+        // user doesn't have to retype their message.
         setSnackbar({
           open: true,
           severity: "error",
-          message: "Failed to send message. Please try again later.",
+          message:
+            error.response?.data?.message ||
+            "Failed to send message. Please try again later.",
         });
       } finally {
-        setIsSubmitting(false); 
+        setIsSubmitting(false);
       }
     },
     [formData, validateForm]

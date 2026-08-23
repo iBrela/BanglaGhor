@@ -123,7 +123,26 @@ function classifyValhallaError(error) {
       return new RoutingError(
         "NO_ROUTE",
         `Valhalla returned no route: ${error.response.data.error}`,
-     .m  if (!VALHALLA_URL) {
+        error
+      );
+    }
+    return new RoutingError(
+      "UNEXPECTED",
+      `Valhalla returned an unrecognized error response (status ${error.response.status})`,
+      error
+    );
+  }
+  // No response at all: connection refused, DNS failure, timeout, etc. -
+  // Valhalla (or the network path to it) is the problem, not the request.
+  return new RoutingError(
+    "ENGINE_UNAVAILABLE",
+    `Could not reach the routing engine: ${error.code || error.message}`,
+    error
+  );
+}
+
+async function callValhalla(path, payload) {
+  if (!VALHALLA_URL) {
     throw new RoutingError(
       "ENGINE_UNAVAILABLE",
       "VALHALLA_URL is not configured"

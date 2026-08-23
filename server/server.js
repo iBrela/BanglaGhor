@@ -13,6 +13,7 @@ const locationRoutes = require("./routes/locationRoutes");
 const poiRoutes = require("./routes/poiRoutes");
 const routingRoutes = require("./routes/routingRoutes");
 const accessibilityRoutes = require("./routes/accessibilityRoutes");
+const contactRoutes = require("./routes/contactRoutes");
 
 // 2) imports
 const express = require("express");
@@ -64,6 +65,7 @@ app.use("/api/locations", locationRoutes);
 app.use("/api/pois", poiRoutes);
 app.use("/api/routing", routingRoutes);
 app.use("/api/accessibility", accessibilityRoutes);
+app.use("/api/contact", contactRoutes);
 
 // 4) Connect to DB
 // No process.exit() here: this module is also require()'d directly by the
