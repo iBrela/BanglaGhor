@@ -64,19 +64,15 @@ router.use((error, req, res, next) => {
         .status(400)
         .json({ message: "File is too large. Maximum size is 5MB." });
     }
-    return res
-      .status(400)
-      .json({ message: `File upload error: ${error.message}` });
+    return res.status(400).json({ message: "File upload error." });
   } else if (error) {
-    
+
     console.error("File Upload Error (Non-Multer):", error);
-    
+
     if (error.message.startsWith("Invalid file type")) {
       return res.status(400).json({ message: error.message });
     }
-    return res
-      .status(500)
-      .json({ message: `File upload failed: ${error.message}` });
+    return res.status(500).json({ message: "File upload failed." });
   }
   
   next();

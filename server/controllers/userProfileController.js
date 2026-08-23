@@ -210,7 +210,6 @@ exports.uploadGovtId = async (req, res) => {
     console.error(`ID Upload Error processing file for ${userEmail}:`, error);
     res.status(500).json({
       message: "Server error processing ID upload.",
-      error: error.message,
     });
   }
 };

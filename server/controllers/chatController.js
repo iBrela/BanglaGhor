@@ -24,9 +24,9 @@ exports.generateAblyToken = async (req, res) => {
     });
     res.status(200).json(tokenRequest);
   } catch (error) {
+    console.error("Failed to generate Ably token:", error);
     res.status(500).json({
       message: "Failed to generate Ably token.",
-      error: error.message,
     });
   }
 };
@@ -72,9 +72,9 @@ exports.initiateOrGetConversation = async (req, res) => {
 
     res.status(200).json(conversation);
   } catch (error) {
+    console.error("Error processing conversation request:", error);
     res.status(500).json({
       message: "Server error processing conversation request.",
-      error: error.message,
     });
   }
 };
@@ -153,9 +153,9 @@ exports.postMessageToConversation = async (req, res) => {
 
     res.status(201).json(populatedMessage);
   } catch (error) {
+    console.error("Error posting message:", error);
     res.status(500).json({
       message: "Server error posting message.",
-      error: error.message,
     });
   }
 };
@@ -206,9 +206,9 @@ exports.getConversationsForUser = async (req, res) => {
 
     res.status(200).json(conversations);
   } catch (error) {
+    console.error("Error fetching conversations:", error);
     res.status(500).json({
       message: "Server error fetching conversations.",
-      error: error.message,
     });
   }
 };
@@ -250,9 +250,9 @@ exports.getMessagesInConversation = async (req, res) => {
       totalMessages,
     });
   } catch (error) {
+    console.error("Error fetching messages:", error);
     res.status(500).json({
       message: "Server error fetching messages.",
-      error: error.message,
     });
   }
 };
@@ -274,9 +274,9 @@ exports.markConversationAsRead = async (req, res) => {
 
     res.status(200).json({ success: true });
   } catch (error) {
+    console.error("Error marking messages as read:", error);
     res.status(500).json({
       message: "Server error marking messages as read.",
-      error: error.message,
     });
   }
 };
@@ -306,9 +306,9 @@ exports.getConversationsSummaryForUser = async (req, res) => {
 
     res.status(200).json(conversations);
   } catch (error) {
+    console.error("Error fetching conversations summary:", error);
     res.status(500).json({
       message: "Server error fetching conversations summary.",
-      error: error.message,
     });
   }
 };

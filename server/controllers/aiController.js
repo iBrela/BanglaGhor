@@ -263,10 +263,9 @@ ${formatBangladeshDetailsForPrompt(bdDetails)}`;
       });
     }
   } catch (error) {
-    console.error("AI Description Error:", error?.message);
+    console.error("AI Description Error:", error);
     res.status(500).json({
       error: "Failed to generate property description",
-      details: error?.message || "Unknown AI service error",
     });
   }
 };
@@ -376,9 +375,10 @@ const healthCheck = async (req, res) => {
       checks,
     });
   } catch (error) {
+    console.error("Health check error:", error);
     return res.status(500).json({
       status: "error",
-      message: error.message,
+      message: "Health check failed.",
     });
   }
 };
