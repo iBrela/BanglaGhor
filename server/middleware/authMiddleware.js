@@ -53,7 +53,10 @@ const fetchJWKs = async () => {
   console.log("[DEBUG fetchJWKs] Fetching URL:", url);
 
   try {
-    const response = await axios.get(url);
+    // 8s: matches the simple-REST-call convention used for OpenCage/Google
+    // Translate (Fix #17/#18) - bounds a hung Cognito JWKS fetch instead of
+    // leaving every incoming authenticated request stuck waiting on it.
+    const response = await axios.get(url, { timeout: 8000 });
     const keys = response.data.keys;
     const newPems = {}; // Build new pems object
     keys.forEach((key) => {

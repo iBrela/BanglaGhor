@@ -1,6 +1,6 @@
 import React, { useState } from "react";
-import { Box, Button, Menu, MenuItem, Badge } from "@mui/material";
-import { Link as RouterLink, useNavigate } from "react-router-dom";
+import { Box, Button, Menu, MenuItem } from "@mui/material";
+import { useNavigate } from "react-router-dom";
 import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
 import { styled } from "@mui/material/styles";
 import { useTranslation } from "react-i18next";

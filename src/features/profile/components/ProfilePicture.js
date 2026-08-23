@@ -1,5 +1,4 @@
 import React from "react";
-import { useState } from "react";
 import { alpha } from "@mui/material/styles";
 import {
   Avatar,
@@ -7,12 +6,10 @@ import {
   IconButton,
   CircularProgress,
   Tooltip,
-  Badge,
 } from "@mui/material";
 import PhotoCamera from "@mui/icons-material/PhotoCamera";
 import PersonIcon from "@mui/icons-material/Person";
 import { styled } from "@mui/material/styles";
-import { useTranslation } from "react-i18next"; 
 
 const Input = styled("input")({
   display: "none",
@@ -51,8 +48,6 @@ const ProfilePicture = ({
   isUpdating,
   onError,
 }) => {
-  const { t } = useTranslation(); 
-
   const handleFileChange = (event) => {
     const file = event.target.files[0];
     if (file && file.type.startsWith("image/")) {

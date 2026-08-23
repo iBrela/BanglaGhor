@@ -9,7 +9,6 @@ import {
   IconButton,
   FormHelperText,
   CircularProgress,
-  LinearProgress, 
 } from "@mui/material";
 import PhotoCameraIcon from "@mui/icons-material/PhotoCamera";
 import DeleteIcon from "@mui/icons-material/Delete";

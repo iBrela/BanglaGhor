@@ -289,7 +289,7 @@ const useListingForm = () => {
         setLoadingAI(false);
       }
     },
-    [formData, features, API_BASE_URL] // Added API_BASE_URL to dependencies
+    [formData, features]
   );
 
   const handleNext = useCallback(() => {
@@ -313,7 +313,7 @@ const useListingForm = () => {
     if (nextStepIndex < steps.length) {
       setActiveStep(nextStepIndex);
     }
-  }, [activeStep, formData.propertyType, validateStep, steps.length]);
+  }, [activeStep, formData.propertyType, validateStep]);
 
   const handleBack = useCallback(() => {
     let prevStepIndex = activeStep - 1;
@@ -603,8 +603,6 @@ const useListingForm = () => {
     navigate,
     validateStep,
     imageUrls,
-    steps,
-    activeStep,
     setActiveStep,
     setSnackbar,
     setLoadingSubmit,

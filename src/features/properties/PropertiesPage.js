@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useMemo } from "react"; // Added useMemo
-import { useParams, useLocation, useNavigate } from "react-router-dom";
+import React, { useState, useMemo } from "react";
+import { useParams, useNavigate } from "react-router-dom";
 import {
   Container,
   Grid,
@@ -47,7 +47,6 @@ const PropertiesPage = () => {
   const { t } = useTranslation();
   const isMobile = useMediaQuery(theme.breakpoints.down("md"));
   const navigate = useNavigate();
-  const location = useLocation();
 
   const [viewMode, setViewMode] = useState("list");
   const [locationInfoOpen, setLocationInfoOpen] = useState(false);

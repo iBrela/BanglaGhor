@@ -13,16 +13,11 @@ import {
 } from "@mui/material"; 
 import { styled } from "@mui/material/styles"; 
 import CloseIcon from "@mui/icons-material/Close"; 
-import { Link as RouterLink, useLocation } from "react-router-dom"; 
-import HomeIcon from "@mui/icons-material/Home"; 
-import InfoIcon from "@mui/icons-material/Info"; 
-import ContactsIcon from "@mui/icons-material/Contacts"; 
-import HomeWorkIcon from "@mui/icons-material/HomeWork"; 
-import AddBusinessIcon from "@mui/icons-material/AddBusiness"; 
-import SellIcon from "@mui/icons-material/Sell"; 
-import StorefrontIcon from "@mui/icons-material/Storefront"; 
-import CheckCircleOutlineIcon from "@mui/icons-material/CheckCircleOutline"; 
-import ChatIcon from "@mui/icons-material/Chat";
+import { useLocation } from "react-router-dom";
+import AddBusinessIcon from "@mui/icons-material/AddBusiness";
+import SellIcon from "@mui/icons-material/Sell";
+import StorefrontIcon from "@mui/icons-material/Storefront";
+import CheckCircleOutlineIcon from "@mui/icons-material/CheckCircleOutline";
 import { useTranslation } from "react-i18next";
 
 const DrawerItem = styled(ListItemButton)(({ theme, selected }) => ({

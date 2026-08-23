@@ -24,7 +24,11 @@ exports.generateAblyToken = async (req, res) => {
     });
     res.status(200).json(tokenRequest);
   } catch (error) {
-    console.error("Failed to generate Ably token:", error);
+    // error.message only - the Ably client is initialized with
+    // ABLY_API_KEY, so logging the full error object risks printing
+    // request/auth details embedded in it on failure (same class of risk
+    // as the NVIDIA API key leak fixed in aiController.js).
+    console.error("Failed to generate Ably token:", error.message);
     res.status(500).json({
       message: "Failed to generate Ably token.",
     });

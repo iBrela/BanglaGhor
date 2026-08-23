@@ -7,9 +7,6 @@ import {
   IconButton,
   Divider,
   useMediaQuery,
-  TextField,
-  Button,
-  Paper,
 } from "@mui/material";
 import { useTheme } from "@mui/material/styles";
 import {
@@ -29,7 +26,6 @@ const Footer = () => {
   const theme = useTheme();
   const { t } = useTranslation(); // Initialize translation
   const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
-  const isTablet = useMediaQuery(theme.breakpoints.between("sm", "md"));
 
   const scrollToTop = () => {
     window.scrollTo({
@@ -106,7 +102,7 @@ const Footer = () => {
 
       <Container maxWidth="lg">
         <Grid container spacing={4}>
-          <Grid item xs={12} sm={6} md={3}>
+          <Grid item xs={12} sm={6} md={4}>
             <Box sx={{ mb: 2 }}>
               <Typography
                 variant="h5"
@@ -248,7 +244,7 @@ const Footer = () => {
             </Box>
           </Grid>
 
-          <Grid item xs={12} sm={6} md={3}>
+          <Grid item xs={12} sm={6} md={4}>
             <Typography
               variant="h6"
               sx={{
@@ -359,7 +355,7 @@ const Footer = () => {
             </Box>
           </Grid>
 
-          <Grid item xs={12} sm={6} md={3}>
+          <Grid item xs={12} sm={6} md={4}>
             <Typography
               variant="h6"
               sx={{
@@ -427,67 +423,6 @@ const Footer = () => {
               </Box>
             </Box>
           </Grid>
-
-          <Grid item xs={12} sm={6} md={3}>
-            <Typography
-              variant="h6"
-              sx={{
-                mb: 2,
-                fontWeight: "bold",
-                position: "relative",
-                "&:after": {
-                  content: '""',
-                  position: "absolute",
-                  bottom: -8,
-                  left: 0,
-                  width: "40px",
-                  height: "3px",
-                  bgcolor: "#2B7B8C",
-                },
-              }}
-            >
-              Newsletter
-            </Typography>
-            <Typography variant="body2" sx={{ mb: 2, color: "#BFBBB8" }}>
-              Subscribe to get the latest property listings and market updates.{" "}
-            </Typography>
-            <Box
-              component="form"
-              sx={{
-                display: "flex",
-                flexDirection: "column",
-              }}
-              noValidate
-            >
-              <TextField
-                placeholder={t("email")}
-                variant="outlined"
-                size="small"
-                sx={{
-                  mb: 1,
-                  ".MuiOutlinedInput-root": {
-                    bgcolor: "rgba(255, 255, 255, 0.1)",
-                    color: "#EFF9FE",
-                    borderRadius: "4px",
-                    "& fieldset": { borderColor: "rgba(255, 255, 255, 0.2)" },
-                    "&:hover fieldset": { borderColor: "#2B7B8C" },
-                    "&.Mui-focused fieldset": { borderColor: "#2B7B8C" },
-                  },
-                  "& input::placeholder": { color: "#BFBBB8", opacity: 1 },
-                }}
-              />
-              <Button
-                variant="contained"
-                sx={{
-                  bgcolor: "#2B7B8C",
-                  "&:hover": { bgcolor: "#8FBFBF" },
-                  color: "#EFF9FE",
-                }}
-              >
-                Subscribe
-              </Button>
-            </Box>
-          </Grid>
         </Grid>
 
         <Divider
@@ -513,30 +448,6 @@ const Footer = () => {
           >
             © {new Date().getFullYear()} BanglaGhor. All rights reserved.{" "}
           </Typography>
-          <Box>
-            <Link
-              href="#"
-              sx={{
-                color: "#BFBBB8",
-                mx: 1,
-                textDecoration: "none",
-                "&:hover": { color: "#8FBFBF" },
-              }}
-            >
-              Privacy Policy
-            </Link>
-            <Link
-              href="#"
-              sx={{
-                color: "#BFBBB8",
-                mx: 1,
-                textDecoration: "none",
-                "&:hover": { color: "#8FBFBF" },
-              }}
-            >
-              Terms of Service
-            </Link>
-          </Box>
         </Box>
       </Container>
     </Box>

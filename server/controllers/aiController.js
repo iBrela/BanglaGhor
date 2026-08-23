@@ -190,8 +190,13 @@ ${formatFeaturesForPrompt(features)}
 **Local Highlights & Context:**
 ${formatBangladeshDetailsForPrompt(bdDetails)}`;
 
+    // "mistralai/mistral-medium-3-instruct" returned a 404 from NVIDIA's
+    // chat completions endpoint - confirmed via /v1/models that this ID
+    // isn't in this key's accessible catalog at all (no "medium" tier model
+    // is). Switched to the closest available flagship-tier instruct model;
+    // same OpenAI-compatible request/response shape, no prompt changes.
     const payload = {
-      model: "mistralai/mistral-medium-3-instruct",
+      model: "mistralai/mistral-large-2-instruct",
       messages: [{ role: "user", content: prompt }],
       max_tokens: 512,
       temperature: 0.8,
@@ -203,7 +208,15 @@ ${formatBangladeshDetailsForPrompt(bdDetails)}`;
       Accept: "application/json",
       "Content-Type": "application/json",
     };
-    const response = await axios.post(NVIDIA_API_URL, payload, { headers });
+    // 20s: LLM completions genuinely take longer than a simple REST call
+    // (unlike the 8s used for OpenCage geocoding/Google Translate below) -
+    // long enough that a normal generation isn't falsely aborted, short
+    // enough to bound this user-facing "generate description" button
+    // rather than letting it hang indefinitely on a slow/hung upstream.
+    const response = await axios.post(NVIDIA_API_URL, payload, {
+      headers,
+      timeout: 20000,
+    });
 
     if (
       response.data &&
@@ -239,6 +252,9 @@ ${formatBangladeshDetailsForPrompt(bdDetails)}`;
                 headers: {
                   "Content-Type": "application/x-www-form-urlencoded",
                 },
+                // Matches the OpenCage geocoding convention (Fix #17) - a
+                // simple text-translation REST call, not LLM inference.
+                timeout: 8000,
               }
             );
             if (
@@ -263,7 +279,12 @@ ${formatBangladeshDetailsForPrompt(bdDetails)}`;
       });
     }
   } catch (error) {
-    console.error("AI Description Error:", error);
+    // error.message only - axios error objects embed the full request
+    // config (including the Authorization: Bearer <NVIDIA_API_KEY> header)
+    // in their `config`/`request` properties, so logging the raw error
+    // object here would print the API key to server logs on every
+    // failure.
+    console.error("AI Description Error:", error.message);
     res.status(500).json({
       error: "Failed to generate property description",
     });

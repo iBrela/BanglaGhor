@@ -5,7 +5,6 @@ import {
   Paper,
   CircularProgress,
   Alert,
-  Box,
 } from "@mui/material";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";

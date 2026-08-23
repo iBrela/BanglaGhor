@@ -8,7 +8,6 @@ import {
   Card,
   CardContent,
   Divider,
-  useMediaQuery,
   Snackbar,
   Alert,
   styled,
@@ -31,15 +30,6 @@ const WavePattern = styled(Box)(({ theme }) => ({
   backgroundSize: "cover",
   opacity: 0.1,
   zIndex: 0,
-}));
-
-const MapContainer = styled(Box)(({ theme }) => ({
-  
-  borderRadius: "12px",
-  overflow: "hidden",
-  boxShadow: "0 5px 15px rgba(0, 0, 0, 0.1)",
-  height: "100%",
-  minHeight: "350px", 
 }));
 
 const FAQCard = styled(Card)(({ theme }) => ({

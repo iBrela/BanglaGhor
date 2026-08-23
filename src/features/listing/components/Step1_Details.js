@@ -8,7 +8,6 @@ import {
   MenuItem,
   FormHelperText,
   Box,
-  Typography,
   InputAdornment,
 } from "@mui/material";
 import { useTranslation } from "react-i18next";

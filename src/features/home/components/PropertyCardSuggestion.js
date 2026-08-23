@@ -1,11 +1,8 @@
 import React from "react";
 import { Box, Typography } from "@mui/material"; 
 import LocationOnIcon from "@mui/icons-material/LocationOn";
-import { useTranslation } from "react-i18next"; 
-
 
 const PropertyCardSuggestion = ({ property, onSelect }) => {
-  const { t } = useTranslation(); 
   const placeholderImg = `${process.env.PUBLIC_URL}/pictures/placeholder.png`;
   const imgSrc = property?.images?.[0] 
     ? `${process.env.PUBLIC_URL}/pictures/${property.images[0]}`

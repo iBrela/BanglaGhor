@@ -81,10 +81,6 @@ exports.getMyProfile = async (req, res) => {
       if (profileNeedsSave) {
         await userProfile.save();
         console.log(`UserProfile updated for ${userEmail} during fetch.`);
-      } else {
-        console.log(
-          `Found UserProfile for ${userEmail}, no immediate updates needed.`
-        );
       }
     }
     res.status(200).json(userProfile.toObject());
@@ -243,9 +239,6 @@ exports.getMyListings = async (req, res) => {
         "title price listingType propertyType images addressLine1 cityTown district createdAt isHidden bedrooms bathrooms area"
       );
 
-    console.log(
-      `Found ${userListings.length} listings for user ${userProfile.email} (ID: ${userProfile._id})`
-    );
     res.status(200).json(userListings);
   } catch (error) {
     console.error(

@@ -45,7 +45,7 @@ const useForgotPassword = () => {
   const validatePassword = useCallback((pwd) => {
     setPasswordValidation({
       hasNumber: /\d/.test(pwd),
-      hasSpecial: /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(pwd),
+      hasSpecial: /[!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?]/.test(pwd),
       hasUppercase: /[A-Z]/.test(pwd),
       hasLowercase: /[a-z]/.test(pwd),
       hasMinLength: pwd.length >= 8,

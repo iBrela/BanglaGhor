@@ -9,9 +9,8 @@ import {
   Alert,
   List,
   Avatar,
-  Divider,
-  IconButton, 
-} from "@mui/material"; 
+  IconButton,
+} from "@mui/material";
 import SendIcon from "@mui/icons-material/Send"; 
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import { useAuth } from "../../../context/AuthContext"; 

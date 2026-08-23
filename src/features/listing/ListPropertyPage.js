@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react"; 
+import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Container,
@@ -11,10 +11,9 @@ import {
   StepLabel,
   Snackbar,
   useMediaQuery,
-  alpha,
   Alert,
   useTheme,
-  CircularProgress, 
+  CircularProgress,
 } from "@mui/material";
 import { styled } from "@mui/material/styles";
 import { useTranslation } from "react-i18next";
@@ -28,17 +27,14 @@ import CheckCircleOutlineIcon from "@mui/icons-material/CheckCircleOutline";
 import ArticleIcon from "@mui/icons-material/Article"; 
 
 
-import { useAuth } from "./../../context/AuthContext";
-
-
 import useListingForm from "./hooks/useListingForm";
-import Step1_Details from "./components/Step1_Details";
-import Step2_Location from "./components/Step2_Location";
-import Step3_Features from "./components/Step3_Features";
-import Step_Bangladesh_Details from "./components/Step_Bangladesh_Details";
-import Step4_Images from "./components/Step4_Images";
-import Step_Description from "./components/Step_Description";
-import Step5_Review from "./components/Step5_Review";
+import Step1Details from "./components/Step1_Details";
+import Step2Location from "./components/Step2_Location";
+import Step3Features from "./components/Step3_Features";
+import StepBangladeshDetails from "./components/Step_Bangladesh_Details";
+import Step4Images from "./components/Step4_Images";
+import StepDescription from "./components/Step_Description";
+import Step5Review from "./components/Step5_Review";
 import ConfirmationDialog from "../../components/common/ConfirmationDialog";
 
 
@@ -118,10 +114,6 @@ const ListPropertyPage = () => {
   ];
   const CurrentStepIcon = stepIcons[activeStep] || InfoIcon;
 
-  const handleCancelListing = () => {
-    setCancelConfirmOpen(true); 
-  };
-
   const confirmCancelListing = () => {
     setCancelConfirmOpen(false); 
     navigate("/home"); 
@@ -146,7 +138,7 @@ const ListPropertyPage = () => {
     switch (step) {
       case 0: // Basic Info
         return (
-          <Step1_Details
+          <Step1Details
             formData={formData}
             errors={errors}
             handleChange={handleChange}
@@ -154,7 +146,7 @@ const ListPropertyPage = () => {
         );
       case 1: // Location
         return (
-          <Step2_Location
+          <Step2Location
             formData={formData}
             errors={errors}
             handleChange={handleChange}
@@ -162,7 +154,7 @@ const ListPropertyPage = () => {
         );
       case 2: // Features (Standard)
         return (
-          <Step3_Features
+          <Step3Features
             features={features}
             handleFeatureChange={handleFeatureChange}
             formData={formData}
@@ -170,7 +162,7 @@ const ListPropertyPage = () => {
         );
       case 3: // Specific Details (BD Context)
         return (
-          <Step_Bangladesh_Details
+          <StepBangladeshDetails
             formData={formData}
             errors={errors.bangladeshDetails || {}}
             handleChange={handleChange}
@@ -194,7 +186,7 @@ const ListPropertyPage = () => {
           typeof removeImageByUrl
         );
         return (
-          <Step4_Images
+          <Step4Images
             imageUrls={imageUrls} 
             imageUploadStates={imageUploadStates} 
             handleImageFileSelected={handleImageFileSelected} 
@@ -204,7 +196,7 @@ const ListPropertyPage = () => {
         );
       case 5: // Description
         return (
-          <Step_Description
+          <StepDescription
             formData={formData}
             errors={errors}
             handleChange={handleChange}
@@ -214,7 +206,7 @@ const ListPropertyPage = () => {
         );
       case 6: // Review
         return (
-          <Step5_Review
+          <Step5Review
             formData={formData}
             features={features}
             images={imageUrls} 

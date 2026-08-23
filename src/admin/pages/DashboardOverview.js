@@ -4,14 +4,11 @@ import { useNavigate } from "react-router-dom";
 import {
   Container,
   Grid,
-  Paper,
   Typography,
   CircularProgress,
   Alert,
   Box,
-  Icon,
   Card,
-  CardContent,
   Avatar,
 } from "@mui/material";
 import {

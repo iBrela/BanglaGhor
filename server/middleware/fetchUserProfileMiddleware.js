@@ -28,10 +28,6 @@ const fetchUserProfileMiddleware = async (req, res, next) => {
     }
 
     req.userProfile = userProfile;
-    console.log(
-      `[FetchProfile] Profile fetched for user: ${req.user.email}, isAdmin: ${userProfile.isAdmin}, status: ${userProfile.accountStatus}, displayName: ${userProfile.displayName}}`
-    );
-
     next();
   } catch (error) {
     console.error(

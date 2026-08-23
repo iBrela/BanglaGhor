@@ -87,12 +87,6 @@ const usePropertyFilters = (apiQueryParams = {}) => {
     [debouncedSetSearch]
   );
 
-  const fuse = useMemo(() => {
-    if (!Array.isArray(allProperties) || allProperties.length === 0)
-      return null;
-    return new Fuse(allProperties, fuseOptions);
-  }, [allProperties]);
-
   const filteredAndSortedProperties = useMemo(() => {
     let result = Array.isArray(allProperties) ? [...allProperties] : [];
     result = result.filter((p) => {
@@ -193,7 +187,7 @@ const usePropertyFilters = (apiQueryParams = {}) => {
     });
 
     return sortedResult;
-  }, [allProperties, clientFilters, debouncedSearchTerm, sortBy, fuse]);
+  }, [allProperties, clientFilters, debouncedSearchTerm, sortBy]);
 
   
   const handleClientFilterChange = useCallback((newFilters) => {

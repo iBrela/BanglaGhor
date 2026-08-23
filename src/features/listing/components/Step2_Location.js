@@ -1,5 +1,5 @@
 import React from "react";
-import { Grid, TextField, Typography, Box } from "@mui/material";
+import { Grid, TextField, Box } from "@mui/material";
 import { useTranslation } from "react-i18next";
 
 const Step2_Location = ({ formData, errors, handleChange }) => {

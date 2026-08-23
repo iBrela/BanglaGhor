@@ -3,7 +3,6 @@ import {
   Container,
   Paper,
   Typography,
-  Box,
   Alert,
   Snackbar,
   Avatar,

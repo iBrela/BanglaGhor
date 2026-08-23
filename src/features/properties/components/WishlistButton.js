@@ -4,11 +4,8 @@ import { IconButton, Tooltip } from "@mui/material";
 import FavoriteIcon from "@mui/icons-material/Favorite";
 import FavoriteBorderIcon from "@mui/icons-material/FavoriteBorder";
 import { alpha } from "@mui/material/styles";
-import { useTranslation } from "react-i18next";
- 
+
 const WishlistButton = ({ isWishlisted, onClick, sx = {} }) => {
-  const { t } = useTranslation();
- 
   const handleClick = (event) => {
     event.stopPropagation();
     event.preventDefault();

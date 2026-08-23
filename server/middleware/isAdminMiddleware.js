@@ -9,11 +9,6 @@ const isAdminMiddleware = (req, res, next) => {
   }
 
   if (req.userProfile.isAdmin) {
-    console.log(
-      `[Admin Check Success] User ${
-        req.user.email || req.userProfile.email
-      } is an admin.`
-    ); 
     next();
   } else {
     console.warn(

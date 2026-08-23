@@ -8,7 +8,6 @@ import {
   ListItem,
   ListItemText,
   Divider,
-  Chip, 
 } from "@mui/material";
 import { useTranslation } from "react-i18next";
 

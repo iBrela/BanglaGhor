@@ -1,8 +1,7 @@
 // src/features/listing/hooks/useEditPropertyForm.js (New File)
 import { useState, useEffect, useCallback } from "react";
 import axios from "axios";
-import { useParams, useNavigate } from "react-router-dom";
-import { useAuth } from "../../../context/AuthContext"; 
+import { useAuth } from "../../../context/AuthContext";
 
 const API_BASE_URL =
   process.env.REACT_APP_API_URL || "http://localhost:5001/api";
@@ -14,9 +13,8 @@ const useEditPropertyForm = (propertyId) => {
   const [error, setError] = useState(null);
   const [validationErrors, setValidationErrors] = useState({}); 
   const { idToken } = useAuth();
-  const navigate = useNavigate();
 
-  
+
   useEffect(() => {
     const fetchProperty = async () => {
       if (!propertyId || !idToken) {

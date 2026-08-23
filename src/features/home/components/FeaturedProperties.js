@@ -100,11 +100,6 @@ const FeaturedProperties = () => {
     }
   };
 
-  const handleViewDetails = (property) => {
-    const mode = property.listingType || "rent";
-    navigate(`/properties/${mode}?open=${property._id}`);
-  };
-
   return (
     <Box sx={{ py: 6, bgcolor: "rgba(43, 123, 140, 0.03)" }}>
       <Container maxWidth="lg">

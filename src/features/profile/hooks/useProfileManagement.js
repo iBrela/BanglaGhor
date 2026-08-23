@@ -248,7 +248,7 @@ const useProfileManagement = () => {
       closeDeleteDialog();
       logout();
     }
-  }, [performCognitoAction, checkAuthState, closeDeleteDialog, logout]);
+  }, [performCognitoAction, closeDeleteDialog, logout]);
 
   const handleUpdatePicture = useCallback(
     async (base64String) => {

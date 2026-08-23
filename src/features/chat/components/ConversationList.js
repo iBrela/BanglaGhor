@@ -29,7 +29,6 @@ const ConversationList = ({ currentUserProfileId }) => {
     unreadCounts,
     selectConversation: selectConversationFromContext,
     activeConversationId,
-    markMessagesAsRead,
   } = useChatContext();
 
   const actualCurrentUserId = currentUserProfileId || user?._id;
