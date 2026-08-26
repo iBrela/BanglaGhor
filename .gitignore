@@ -15,9 +15,17 @@
 # production
 /build
 
-# PMTiles basemap build output (large binary files, built locally via Planetiler)
-map-build/
-*.pmtiles
+# PMTiles basemap build output. Everything under map-build/ is large,
+# regenerable build data (raw OSM/Natural Earth source extracts in
+# sources/, Valhalla routing-graph output in valhalla/, build scratch
+# space in tmp/, and intermediate POI/weight files) EXCEPT the final
+# bangladesh.pmtiles archive itself, which the running frontend actually
+# needs (REACT_APP_PMTILES_URL) and is distributed to teammates via Git
+# LFS instead - see README.md's "Map data setup" section.
+map-build/*
+!map-build/data
+map-build/data/*
+!map-build/data/bangladesh.pmtiles
 
 # Generated Bangladesh Map Coverage Audit reports (reproducible via
 # `node tools/mapCoverageAudit/run.js` - not meant to be tracked, since they
