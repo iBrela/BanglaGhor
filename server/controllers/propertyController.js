@@ -2,6 +2,10 @@ const Property = require("../models/property.js");
 const mongoose = require("mongoose");
 const axios = require("axios");
 const {
+  buildBilingualDescription,
+  buildFromManualDescription,
+} = require("../services/propertyDescriptionService");
+const {
   S3Client,
   PutObjectCommand,
   DeleteObjectCommand,
@@ -323,6 +327,23 @@ exports.createProperty = async (req, res) => {
       }
     }
 
+    // Bilingual description: if the seller typed one (English OR Bangla -
+    // detected automatically, see propertyDescriptionService.detectLanguage),
+    // it's used as-is (never overwritten by AI) and only translated to the
+    // other language. If left blank, the Groq -> Gemini -> deterministic-
+    // template chain fills in English, then Gemini -> Groq translates it to
+    // Bangla. None of this throws, so listing creation can't fail because an
+    // AI/translation provider is down. `description` (legacy field) is set
+    // by the service itself - normally the English version, but if the
+    // seller wrote in Bangla and translation to English failed, it holds
+    // their original Bangla text instead of being left empty.
+    const manualDescription = (req.body.description || "").trim();
+    const { description, description_en, description_bn } =
+      await buildBilingualDescription(propertyData, manualDescription);
+    propertyData.description = description;
+    propertyData.description_en = description_en;
+    propertyData.description_bn = description_bn;
+
     const newProperty = new Property(propertyData);
     await newProperty.save();
     const populatedProperty = await Property.findById(newProperty._id).populate(
@@ -551,6 +572,34 @@ exports.updateProperty = async (req, res) => {
     for (const field of OWNER_EDITABLE_PROPERTY_FIELDS) {
       if (field in req.body) {
         updatedFields[field] = req.body[field];
+      }
+    }
+
+    // Conservative bilingual-description handling: only touch
+    // description/description_en/description_bn when the seller submitted a
+    // real, intentional change - i.e. text that doesn't already match any
+    // of the three stored description fields (covers both "resubmitted the
+    // English version unchanged" and "resubmitted the Bangla version
+    // unchanged"). An empty or unchanged submission leaves all three fields
+    // exactly as stored - this never runs automatically on every edit, and
+    // never overwrites seller-written content with AI output. When it does
+    // run, the language of the NEW text is auto-detected (English or
+    // Bangla) and only the opposite-language field is (re)translated - see
+    // propertyDescriptionService.buildFromManualDescription.
+    if ("description" in req.body) {
+      const trimmedNewDescription = (req.body.description || "").trim();
+      const isUnchanged =
+        !trimmedNewDescription ||
+        trimmedNewDescription === (existingProperty.description_en || "") ||
+        trimmedNewDescription === (existingProperty.description_bn || "") ||
+        trimmedNewDescription === (existingProperty.description || "");
+      if (!isUnchanged) {
+        const result = await buildFromManualDescription(trimmedNewDescription);
+        updatedFields.description = result.description;
+        updatedFields.description_en = result.description_en;
+        updatedFields.description_bn = result.description_bn;
+      } else {
+        delete updatedFields.description;
       }
     }
 

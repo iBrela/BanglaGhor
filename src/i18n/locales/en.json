@@ -1,4 +1,7 @@
 {
+  "audio_not_supported": "Audio playback is not supported on this device.",
+  "bangla_audio_unavailable": "Bangla audio is not available on this device.",
+  "description_helper_auto": "Leave this blank to automatically generate a description from your property details.",
   "hero_title": "Find Your Dream",
   "in_bangladesh": "in Bangladesh",
   "home_translated": "Home",

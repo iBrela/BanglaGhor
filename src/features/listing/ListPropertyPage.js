@@ -82,12 +82,10 @@ const ListPropertyPage = () => {
     handleImageFileSelected,
     removeImageByUrl,
     errors,
-    loadingAI,
     loadingSubmit,
     snackbar,
     handleChange,
     handleFeatureChange,
-    generateDescription,
     handleNext,
     handleBack,
     handleSubmit,
@@ -200,8 +198,6 @@ const ListPropertyPage = () => {
             formData={formData}
             errors={errors}
             handleChange={handleChange}
-            generateDescription={generateDescription}
-            loadingAI={loadingAI}
           />
         );
       case 6: // Review
@@ -289,7 +285,7 @@ const ListPropertyPage = () => {
         >
           {/* Back Button */}
           <Button
-            disabled={activeStep === 0 || loadingSubmit || loadingAI}
+            disabled={activeStep === 0 || loadingSubmit}
             onClick={handleBack}
             variant="outlined"
             color="primary"
@@ -303,7 +299,7 @@ const ListPropertyPage = () => {
             variant="outlined"
             color="error"
             onClick={() => setCancelConfirmOpen(true)} 
-            disabled={loadingSubmit || loadingAI}
+            disabled={loadingSubmit}
             sx={{ borderRadius: "8px", textTransform: "none", mx: 2 }}
           >
             {t("cancel_listing", "Cancel Listing")}
@@ -313,7 +309,7 @@ const ListPropertyPage = () => {
           <StyledButton
             variant="contained"
             color="primary"
-            disabled={loadingSubmit || loadingAI}
+            disabled={loadingSubmit}
             onClick={
               activeStep === steps.length - 1 ? handleSubmit : handleNext
             }

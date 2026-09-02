@@ -84,7 +84,6 @@ const useListingForm = () => {
   const [imageUploadStates, setImageUploadStates] = useState({});
 
   const [errors, setErrors] = useState({});
-  const [loadingAI, setLoadingAI] = useState(false);
   const [loadingSubmit, setLoadingSubmit] = useState(false);
   const [snackbar, setSnackbar] = useState({
     open: false,
@@ -227,70 +226,10 @@ const useListingForm = () => {
     [formData, imageUrls]
   );
 
-  const generateDescription = useCallback(
-    async (language = "en", userPmt = "") => {
-      // userPmt is the user's custom prompt
-      setLoadingAI(true);
-      setErrors((prev) => ({ ...prev, description: null }));
-      try {
-        const propertyDataForAI = {
-          basicInfo: {
-            title: formData.title,
-            propertyType: formData.propertyType,
-            listingType: formData.listingType,
-            price: formData.price,
-            area: formData.area,
-            bedrooms: formData.bedrooms,
-            bathrooms: formData.bathrooms,
-          },
-          location: {
-            addressLine1: formData.addressLine1,
-            addressLine2: formData.addressLine2,
-            cityTown: formData.cityTown,
-            upazila: formData.upazila,
-            district: formData.district,
-            postalCode: formData.postalCode,
-          },
-          features,
-          bangladeshDetails: formData.bangladeshDetails,
-          userPrompt: userPmt, // Include the user's custom prompt here
-        };
-
-        const payload = {
-          propertyData: propertyDataForAI,
-          language,
-        };
-
-        // Debug: Log the payload to ensure it's what you expect
-        console.log(
-          "[useListingForm] Payload for AI:",
-          JSON.stringify(payload, null, 2)
-        );
-
-        const res = await axios.post(
-          `${API_BASE_URL}/generate-description`,
-          payload
-        );
-        return res.data.description; // Return the description
-      } catch (error) {
-        console.error(
-          "Error generating description:",
-          error.response ? error.response.data : error.message
-        );
-        setSnackbar({
-          open: true,
-          message: `Failed to generate description. ${
-            error.response?.data?.details || ""
-          }`,
-          severity: "error",
-        });
-        return null; // Return null on error
-      } finally {
-        setLoadingAI(false);
-      }
-    },
-    [formData, features]
-  );
+  // Bilingual description generation now happens automatically server-side
+  // on submit (see server/controllers/propertyController.js +
+  // server/services/propertyDescriptionService.js) when the seller leaves
+  // this field blank - no frontend-triggered AI call needed here anymore.
 
   const handleNext = useCallback(() => {
     if (!validateStep(activeStep)) {
@@ -621,14 +560,12 @@ const useListingForm = () => {
     imageUrls,
     imageUploadStates,
     errors,
-    loadingAI,
     loadingSubmit,
     snackbar,
     handleChange,
     handleFeatureChange,
     handleImageFileSelected,
     removeImageByUrl,
-    generateDescription,
     handleNext,
     handleBack,
     handleSubmit,

@@ -64,6 +64,8 @@ import useWishlist from "./../hooks/useWishlist";
 import { initiateOrGetConversation } from "../../chat/services/chatService";
 import { useSnackbar } from "../../../context/SnackbarContext";
 import { getPropertyDisplayCoordinates } from "../../../shared/propertyLocation";
+import { getDisplayDescription } from "../../../shared/propertyDescription";
+import { normalizeLang } from "../../../shared/language";
  
 const API_BASE_URL =
   process.env.REACT_APP_API_URL || "http://localhost:5001/api";
@@ -176,7 +178,10 @@ const PropertyDetailPage = () => {
  
   // ── Text-to-speech state ──────────────────────────────────────────────────
   const [isSpeaking, setIsSpeaking] = useState(false);
+  const [voices, setVoices] = useState([]);
   const utteranceRef = useRef(null);
+  const speechSupported =
+    typeof window !== "undefined" && !!window.speechSynthesis;
   // ─────────────────────────────────────────────────────────────────────────
  
   const fetchPropertyDetails = useCallback(async () => {
@@ -225,40 +230,79 @@ const PropertyDetailPage = () => {
     fetchPropertyDetails();
   }, [fetchPropertyDetails]);
  
-  // ── Stop speech when leaving page ────────────────────────────────────────
+  // ── Load available voices ────────────────────────────────────────────────
+  // getVoices() can return an empty array on first call in some browsers
+  // until the async voiceschanged event fires, so listen for that too.
+  useEffect(() => {
+    if (!speechSupported) return;
+    const loadVoices = () => setVoices(window.speechSynthesis.getVoices());
+    loadVoices();
+    window.speechSynthesis.onvoiceschanged = loadVoices;
+    return () => {
+      if (window.speechSynthesis) window.speechSynthesis.onvoiceschanged = null;
+    };
+  }, [speechSupported]);
+
+  const hasBengaliVoice = voices.some((v) =>
+    v.lang?.toLowerCase().startsWith("bn")
+  );
+
+  const stopSpeaking = useCallback(() => {
+    if (window.speechSynthesis) window.speechSynthesis.cancel();
+    setIsSpeaking(false);
+  }, []);
+
+  // ── Cancel speech on language change, on switching to a different
+  // property, and on unmount. A single effect keyed on both values covers
+  // all three: the cleanup fires before either dependency changes, and
+  // again on final unmount. ────────────────────────────────────────────────
   useEffect(() => {
     return () => {
-      window.speechSynthesis.cancel();
+      stopSpeaking();
     };
-  }, []);
+  }, [i18n.language, propertyId, stopSpeaking]);
   // ─────────────────────────────────────────────────────────────────────────
- 
+
   // ── Text-to-speech handler ────────────────────────────────────────────────
   const handleSpeak = () => {
+    if (!speechSupported) return;
     if (isSpeaking) {
-      window.speechSynthesis.cancel();
-      setIsSpeaking(false);
+      stopSpeaking();
       return;
     }
- 
-    const text = property?.description || "No description available.";
+
+    const currentLang = normalizeLang(i18n.resolvedLanguage || i18n.language);
+    if (currentLang === "bn" && !hasBengaliVoice) return; // button is disabled in this state, see JSX below
+
+    const text = getDisplayDescription(property, currentLang);
+    if (!text) return;
+
+    // Safety net: never allow overlapping utterances even if isSpeaking
+    // state is stale for any reason.
+    window.speechSynthesis.cancel();
+
     const utterance = new SpeechSynthesisUtterance(text);
- 
-    // Pick language based on current app language
-    const currentLang = i18n.language;
-    if (currentLang === "bn" || currentLang === "bangla") {
-      utterance.lang = "bn-BD"; // Bangla
+    if (currentLang === "bn") {
+      const bnVoice =
+        voices.find((v) => v.lang?.toLowerCase() === "bn-bd") ||
+        voices.find((v) => v.lang?.toLowerCase().startsWith("bn"));
+      utterance.lang = bnVoice?.lang || "bn-BD";
+      if (bnVoice) utterance.voice = bnVoice;
     } else {
-      utterance.lang = "en-US"; // English
+      const enVoice =
+        voices.find((v) => v.lang?.toLowerCase() === "en-us") ||
+        voices.find((v) => v.lang?.toLowerCase().startsWith("en"));
+      utterance.lang = enVoice?.lang || "en-US";
+      if (enVoice) utterance.voice = enVoice;
     }
- 
+
     utterance.rate = 0.95;
     utterance.pitch = 1;
- 
+
     utterance.onstart = () => setIsSpeaking(true);
     utterance.onend = () => setIsSpeaking(false);
     utterance.onerror = () => setIsSpeaking(false);
- 
+
     utteranceRef.current = utterance;
     window.speechSynthesis.speak(utterance);
   };
@@ -362,7 +406,10 @@ const PropertyDetailPage = () => {
   const bdDetails = property.bangladeshDetails || {};
   const features = property.features || {};
   const isLandOrCommercial = property.propertyType === "land" || property.propertyType === "commercial";
- 
+  const currentAudioLang = normalizeLang(i18n.resolvedLanguage || i18n.language);
+  const displayedDescription = getDisplayDescription(property, currentAudioLang);
+  const bengaliAudioUnavailable = currentAudioLang === "bn" && !hasBengaliVoice;
+
   const isOwnListing =
     isLoggedIn &&
     property?.createdBy &&
@@ -587,39 +634,53 @@ const PropertyDetailPage = () => {
             <Typography variant="h6" component="h3" fontWeight="medium">
               {t("property_description_heading", "Property Description")}
             </Typography>
-            <Tooltip title={isSpeaking ? t("stop_audio", "Stop Audio") : t("listen_description", "Listen to Description")} arrow>
-              <IconButton
-                onClick={handleSpeak}
-                sx={{
-                  color: isSpeaking ? "#FF5F40" : "primary.main",
-                  backgroundColor: isSpeaking ? "rgba(255,95,64,0.1)" : "rgba(0,212,232,0.08)",
-                  border: isSpeaking ? "1px solid rgba(255,95,64,0.4)" : "1px solid rgba(0,212,232,0.3)",
-                  borderRadius: "10px",
-                  px: 1.5,
-                  gap: 0.5,
-                  "&:hover": {
-                    backgroundColor: isSpeaking ? "rgba(255,95,64,0.2)" : "rgba(0,212,232,0.15)",
-                  },
-                  // pulse animation when speaking
-                  animation: isSpeaking ? "pulse 1.5s infinite" : "none",
-                  "@keyframes pulse": {
-                    "0%": { boxShadow: "0 0 0 0 rgba(255,95,64,0.4)" },
-                    "70%": { boxShadow: "0 0 0 8px rgba(255,95,64,0)" },
-                    "100%": { boxShadow: "0 0 0 0 rgba(255,95,64,0)" },
-                  },
-                }}
-              >
-                {isSpeaking ? <StopIcon fontSize="small" /> : <VolumeUpIcon fontSize="small" />}
-                <Typography variant="caption" sx={{ fontWeight: 600, fontSize: "0.75rem" }}>
-                  {isSpeaking ? t("stop_audio", "Stop") : t("listen", "Listen")}
-                </Typography>
-              </IconButton>
+            <Tooltip
+              title={
+                !speechSupported
+                  ? t("audio_not_supported", "Audio playback is not supported on this device.")
+                  : bengaliAudioUnavailable
+                  ? t("bangla_audio_unavailable", "Bangla audio is not available on this device.")
+                  : isSpeaking
+                  ? t("stop_audio", "Stop Audio")
+                  : t("listen_description", "Listen to Description")
+              }
+              arrow
+            >
+              <span>
+                <IconButton
+                  onClick={handleSpeak}
+                  disabled={!speechSupported || bengaliAudioUnavailable}
+                  sx={{
+                    color: isSpeaking ? "#FF5F40" : "primary.main",
+                    backgroundColor: isSpeaking ? "rgba(255,95,64,0.1)" : "rgba(0,212,232,0.08)",
+                    border: isSpeaking ? "1px solid rgba(255,95,64,0.4)" : "1px solid rgba(0,212,232,0.3)",
+                    borderRadius: "10px",
+                    px: 1.5,
+                    gap: 0.5,
+                    "&:hover": {
+                      backgroundColor: isSpeaking ? "rgba(255,95,64,0.2)" : "rgba(0,212,232,0.15)",
+                    },
+                    // pulse animation when speaking
+                    animation: isSpeaking ? "pulse 1.5s infinite" : "none",
+                    "@keyframes pulse": {
+                      "0%": { boxShadow: "0 0 0 0 rgba(255,95,64,0.4)" },
+                      "70%": { boxShadow: "0 0 0 8px rgba(255,95,64,0)" },
+                      "100%": { boxShadow: "0 0 0 0 rgba(255,95,64,0)" },
+                    },
+                  }}
+                >
+                  {isSpeaking ? <StopIcon fontSize="small" /> : <VolumeUpIcon fontSize="small" />}
+                  <Typography variant="caption" sx={{ fontWeight: 600, fontSize: "0.75rem" }}>
+                    {isSpeaking ? t("stop_audio", "Stop") : t("listen", "Listen")}
+                  </Typography>
+                </IconButton>
+              </span>
             </Tooltip>
           </Box>
           {/* ─────────────────────────────────────────────────────────────── */}
- 
+
           <Typography variant="body1" paragraph sx={{ color: "text.secondary", whiteSpace: "pre-wrap", lineHeight: 1.7 }}>
-            {displayText(property.description, t("no_description_available", "No description available."))}
+            {displayText(displayedDescription, t("no_description_available", "No description available."))}
           </Typography>
         </TabPanel>
  

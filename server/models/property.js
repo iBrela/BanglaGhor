@@ -165,7 +165,14 @@ const propertySchema = new mongoose.Schema(
     },
 
     // Description & Images
+    // description stays as the legacy/display field (kept in sync with
+    // description_en for anything still reading it directly). description_en
+    // and description_bn are additive - both default to "" so existing
+    // documents never need a migration and simply read as "no bilingual
+    // version yet", falling back to the legacy field on the frontend.
     description: { type: String },
+    description_en: { type: String, default: "" },
+    description_bn: { type: String, default: "" },
     images: {
       type: [String], // Array of S3 image URLs
       default: [],

@@ -1,17 +1,19 @@
 import React from "react";
 import { useTranslation } from "react-i18next";
 import { Box, Button } from "@mui/material";
+import { normalizeLang } from "../../shared/language";
 
 const LanguageToggle = () => {
   const { i18n } = useTranslation();
+  const currentLang = normalizeLang(i18n.resolvedLanguage || i18n.language);
 
   const handleToggle = () => {
-    const newLang = i18n.language === "en" ? "bn" : "en";
+    const newLang = currentLang === "en" ? "bn" : "en";
     i18n.changeLanguage(newLang);
   };
 
   const getLabel = () => {
-    return i18n.language === "en" ? "বাংলা" : "English";
+    return currentLang === "en" ? "বাংলা" : "English";
   };
 
   return (
