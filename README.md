@@ -10,7 +10,7 @@ The platform is designed to help users browse and manage property listings while
 - Node.js / Express.js – Backend
 - MongoDB – Database
 - AWS Cognito – Authentication
-- AWS S3 / LocalStack – Property image storage
+- AWS S3 – Property image storage
 - Groq API – AI chatbot
 - Google Translate API – English and Bangla translation
 - OpenCage – Geocoding/location services

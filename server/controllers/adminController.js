@@ -7,7 +7,7 @@ const { subDays } = require("date-fns");
 const { deletePropertyImages } = require("./propertyController");
 
 // ============================================================================
-// S3 Client Setup (AWS by default, LocalStack when USE_LOCALSTACK=true)
+// S3 Client Setup
 // ============================================================================
 const s3Client = new S3Client({
   region: process.env.APP_AWS_REGION,
@@ -15,35 +15,18 @@ const s3Client = new S3Client({
     accessKeyId: process.env.APP_AWS_ACCESS_KEY_ID,
     secretAccessKey: process.env.APP_AWS_SECRET_ACCESS_KEY,
   },
-  // LocalStack overrides (only active when USE_LOCALSTACK=true)
-  ...(process.env.USE_LOCALSTACK === "true" && {
-    endpoint: process.env.LOCALSTACK_ENDPOINT || "http://localhost:4566",
-    forcePathStyle: true,
-    credentials: {
-      accessKeyId: "test",
-      secretAccessKey: "test",
-    },
-  }),
 });
 const S3_BUCKET = process.env.S3_BUCKET_NAME;
 
 // ============================================================================
-// Helper: Extract S3 key from URL (handles both AWS and LocalStack formats)
+// Helper: Extract S3 key from URL
 // ============================================================================
-// AWS format:        https://bucket.s3.region.amazonaws.com/key/path/file
-// LocalStack format: http://localhost:4566/bucket/key/path/file
+// AWS format: https://bucket.s3.region.amazonaws.com/key/path/file
 // ============================================================================
 function extractS3KeyFromUrl(url) {
   if (!url) return null;
   try {
     const urlObj = new URL(url);
-    // LocalStack path-style URL
-    if (urlObj.hostname === "localhost" || urlObj.hostname === "127.0.0.1") {
-      const pathParts = urlObj.pathname.split("/").filter(Boolean);
-      pathParts.shift(); // Remove bucket name (first segment)
-      return decodeURIComponent(pathParts.join("/"));
-    }
-    // AWS virtual-hosted-style URL
     if (urlObj.hostname.endsWith("amazonaws.com")) {
       return decodeURIComponent(urlObj.pathname.substring(1));
     }
@@ -105,7 +88,7 @@ exports.viewUserGovtId = async (req, res) => {
         .status(404)
         .json({ message: "Government ID not uploaded for this user." });
     }
-    // Extract the S3 Key from the stored URL (handles AWS + LocalStack)
+    // Extract the S3 Key from the stored URL
     const s3Key = extractS3KeyFromUrl(userProfile.govtIdUrl);
     if (!s3Key) {
       console.error(`Could not parse S3 key from URL: ${userProfile.govtIdUrl}`);
@@ -633,8 +616,8 @@ exports.restoreListing = async (req, res) => {
 // Shared core for permanent deletion. `filter` MUST always constrain to
 // isDeleted: true - callers are responsible for that, and both callers below
 // hardcode it themselves so it can never be built from raw client input.
-// Cleans up S3/LocalStack images before removing the database records; an
-// image cleanup failure is logged but never blocks the deletion itself.
+// Cleans up S3 images before removing the database records; an image
+// cleanup failure is logged but never blocks the deletion itself.
 // ============================================================================
 async function permanentlyDeleteByFilter(filter, adminEmail) {
   const propertiesToDelete = await Property.find(filter).select("_id images");

@@ -13,7 +13,7 @@ const {
 const { v4: uuidv4 } = require("uuid");
 
 // ============================================================================
-// S3 Client Setup (AWS by default, LocalStack when USE_LOCALSTACK=true)
+// S3 Client Setup
 // ============================================================================
 const propertyImagesS3Client = new S3Client({
   region: process.env.APP_AWS_REGION,
@@ -21,34 +21,17 @@ const propertyImagesS3Client = new S3Client({
     accessKeyId: process.env.PROPERTY_IMAGES_ACCESS_KEY,
     secretAccessKey: process.env.PROPERTY_IMAGES_SECRET_KEY,
   },
-  // LocalStack overrides (only active when USE_LOCALSTACK=true)
-  ...(process.env.USE_LOCALSTACK === "true" && {
-    endpoint: process.env.LOCALSTACK_ENDPOINT || "http://localhost:4566",
-    forcePathStyle: true,
-    credentials: {
-      accessKeyId: "test",
-      secretAccessKey: "test",
-    },
-  }),
 });
 const S3_PROPERTY_IMAGES_BUCKET = process.env.APP_S3_BUCKET_PROPERTY_IMAGES;
 const S3_PROPERTY_IMAGES_FOLDER = "property-images/";
 
 // ============================================================================
-// Helper: Build S3 object URL (AWS or LocalStack format)
-// ============================================================================
-// ============================================================================
-// Helper: Extract S3 key from a property image URL (handles AWS + LocalStack)
+// Helper: Extract S3 key from a property image URL
 // ============================================================================
 function extractS3KeyFromUrl(url) {
   if (!url) return null;
   try {
     const urlObj = new URL(url);
-    if (urlObj.hostname === "localhost" || urlObj.hostname === "127.0.0.1") {
-      const pathParts = urlObj.pathname.split("/").filter(Boolean);
-      pathParts.shift(); // Remove bucket name (first segment)
-      return decodeURIComponent(pathParts.join("/"));
-    }
     if (urlObj.hostname.endsWith("amazonaws.com")) {
       return decodeURIComponent(urlObj.pathname.substring(1));
     }
@@ -60,7 +43,7 @@ function extractS3KeyFromUrl(url) {
 }
 
 // ============================================================================
-// Helper: Permanently delete property images from S3/LocalStack.
+// Helper: Permanently delete property images from S3.
 // Used ONLY by admin permanent-delete (never on soft delete or hide/unfeature).
 // Errors on individual images are logged and skipped, not thrown, so a bad
 // image URL never blocks the rest of the cleanup or the DB deletion itself.
@@ -85,10 +68,6 @@ async function deletePropertyImages(imageUrls) {
 exports.deletePropertyImages = deletePropertyImages;
 
 function buildS3ObjectUrl(bucket, key) {
-  if (process.env.USE_LOCALSTACK === "true") {
-    const endpoint = process.env.LOCALSTACK_ENDPOINT || "http://localhost:4566";
-    return `${endpoint}/${bucket}/${key}`;
-  }
   return `https://${bucket}.s3.${process.env.APP_AWS_REGION}.amazonaws.com/${key}`;
 }
 
@@ -832,7 +811,6 @@ exports.uploadPropertyImageToS3 = async (req, res) => {
 
     await propertyImagesS3Client.send(new PutObjectCommand(uploadParams));
 
-    // Build URL based on storage backend (AWS or LocalStack)
     const imageUrl = buildS3ObjectUrl(S3_PROPERTY_IMAGES_BUCKET, fileName);
     res
       .status(200)

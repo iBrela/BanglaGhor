@@ -4,7 +4,7 @@ const Property = require("../models/property.js");
 const { S3Client, PutObjectCommand } = require("@aws-sdk/client-s3");
 
 // ============================================================================
-// S3 Client Setup (AWS by default, LocalStack when USE_LOCALSTACK=true)
+// S3 Client Setup
 // ============================================================================
 const s3Client = new S3Client({
   region: process.env.APP_AWS_REGION,
@@ -12,26 +12,13 @@ const s3Client = new S3Client({
     accessKeyId: process.env.APP_AWS_ACCESS_KEY_ID,
     secretAccessKey: process.env.APP_AWS_SECRET_ACCESS_KEY,
   },
-  // LocalStack overrides (only active when USE_LOCALSTACK=true)
-  ...(process.env.USE_LOCALSTACK === "true" && {
-    endpoint: process.env.LOCALSTACK_ENDPOINT || "http://localhost:4566",
-    forcePathStyle: true,
-    credentials: {
-      accessKeyId: "test",
-      secretAccessKey: "test",
-    },
-  }),
 });
 const S3_BUCKET = process.env.S3_BUCKET_NAME;
 
 // ============================================================================
-// Helper: Build S3 object URL (AWS or LocalStack format)
+// Helper: Build S3 object URL
 // ============================================================================
 function buildS3ObjectUrl(bucket, key) {
-  if (process.env.USE_LOCALSTACK === "true") {
-    const endpoint = process.env.LOCALSTACK_ENDPOINT || "http://localhost:4566";
-    return `${endpoint}/${bucket}/${key}`;
-  }
   return `https://${bucket}.s3.${process.env.APP_AWS_REGION}.amazonaws.com/${key}`;
 }
 
@@ -179,7 +166,6 @@ exports.uploadGovtId = async (req, res) => {
     const uploadResult = await s3Client.send(command);
     console.log("S3 Upload Result:", uploadResult);
 
-    // Build URL based on storage backend (AWS or LocalStack)
     const fileUrl = buildS3ObjectUrl(S3_BUCKET, s3Key);
     console.log(`File uploaded successfully to: ${fileUrl}`);
 
