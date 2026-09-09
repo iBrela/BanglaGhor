@@ -1,41 +1,16 @@
 const UserProfile = require("../models/UserProfile");
-const { S3Client, GetObjectCommand } = require("@aws-sdk/client-s3");
+const { GetObjectCommand } = require("@aws-sdk/client-s3");
 const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
 const Property = require("../models/property");
 const mongoose = require("mongoose");
 const { subDays } = require("date-fns");
 const { deletePropertyImages } = require("./propertyController");
+const {
+  getGovtIdS3Client,
+  extractS3KeyFromUrl,
+} = require("../services/s3Provider");
 
-// ============================================================================
-// S3 Client Setup
-// ============================================================================
-const s3Client = new S3Client({
-  region: process.env.APP_AWS_REGION,
-  credentials: {
-    accessKeyId: process.env.APP_AWS_ACCESS_KEY_ID,
-    secretAccessKey: process.env.APP_AWS_SECRET_ACCESS_KEY,
-  },
-});
 const S3_BUCKET = process.env.S3_BUCKET_NAME;
-
-// ============================================================================
-// Helper: Extract S3 key from URL
-// ============================================================================
-// AWS format: https://bucket.s3.region.amazonaws.com/key/path/file
-// ============================================================================
-function extractS3KeyFromUrl(url) {
-  if (!url) return null;
-  try {
-    const urlObj = new URL(url);
-    if (urlObj.hostname.endsWith("amazonaws.com")) {
-      return decodeURIComponent(urlObj.pathname.substring(1));
-    }
-    return null;
-  } catch (e) {
-    console.error("Failed to parse S3 URL:", url, e.message);
-    return null;
-  }
-}
 
 exports.getDashboardStats = async (req, res) => {
   try {
@@ -94,6 +69,7 @@ exports.viewUserGovtId = async (req, res) => {
       console.error(`Could not parse S3 key from URL: ${userProfile.govtIdUrl}`);
       return res.status(500).send("Error processing file location.");
     }
+    const s3Client = await getGovtIdS3Client();
     const command = new GetObjectCommand({
       Bucket: S3_BUCKET,
       Key: s3Key,
@@ -146,6 +122,7 @@ exports.getSignedIdUrlForAdmin = async (req, res) => {
         .status(500)
         .json({ message: "Error processing file location." });
     }
+    const s3Client = await getGovtIdS3Client();
     const command = new GetObjectCommand({ Bucket: S3_BUCKET, Key: s3Key });
     const signedUrl = await getSignedUrl(s3Client, command, { expiresIn: 300 });
     res.status(200).json({ signedUrl: signedUrl });

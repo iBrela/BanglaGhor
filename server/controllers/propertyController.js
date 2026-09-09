@@ -6,41 +6,18 @@ const {
   buildFromManualDescription,
 } = require("../services/propertyDescriptionService");
 const {
-  S3Client,
   PutObjectCommand,
   DeleteObjectCommand,
 } = require("@aws-sdk/client-s3");
 const { v4: uuidv4 } = require("uuid");
+const {
+  getPropertyImagesS3Client,
+  buildS3ObjectUrl,
+  extractS3KeyFromUrl,
+} = require("../services/s3Provider");
 
-// ============================================================================
-// S3 Client Setup
-// ============================================================================
-const propertyImagesS3Client = new S3Client({
-  region: process.env.APP_AWS_REGION,
-  credentials: {
-    accessKeyId: process.env.PROPERTY_IMAGES_ACCESS_KEY,
-    secretAccessKey: process.env.PROPERTY_IMAGES_SECRET_KEY,
-  },
-});
 const S3_PROPERTY_IMAGES_BUCKET = process.env.APP_S3_BUCKET_PROPERTY_IMAGES;
 const S3_PROPERTY_IMAGES_FOLDER = "property-images/";
-
-// ============================================================================
-// Helper: Extract S3 key from a property image URL
-// ============================================================================
-function extractS3KeyFromUrl(url) {
-  if (!url) return null;
-  try {
-    const urlObj = new URL(url);
-    if (urlObj.hostname.endsWith("amazonaws.com")) {
-      return decodeURIComponent(urlObj.pathname.substring(1));
-    }
-    return null;
-  } catch (e) {
-    // Not a parseable absolute URL (e.g. legacy/seed data like "house1.png") - skip it.
-    return null;
-  }
-}
 
 // ============================================================================
 // Helper: Permanently delete property images from S3.
@@ -50,6 +27,7 @@ function extractS3KeyFromUrl(url) {
 // ============================================================================
 async function deletePropertyImages(imageUrls) {
   if (!Array.isArray(imageUrls) || imageUrls.length === 0) return;
+  const propertyImagesS3Client = await getPropertyImagesS3Client();
   for (const url of imageUrls) {
     const key = extractS3KeyFromUrl(url);
     if (!key) continue;
@@ -66,10 +44,6 @@ async function deletePropertyImages(imageUrls) {
   }
 }
 exports.deletePropertyImages = deletePropertyImages;
-
-function buildS3ObjectUrl(bucket, key) {
-  return `https://${bucket}.s3.${process.env.APP_AWS_REGION}.amazonaws.com/${key}`;
-}
 
 const isValidBangladeshLocation = (lat, lng) => {
   const BD_BOUNDS = {
@@ -134,17 +108,109 @@ const constructGeocodingAddress = (addressData) => {
     postalCode,
   } = addressData;
 
-  let addressComponents = [];
-  if (addressLine1) addressComponents.push(addressLine1);
-  if (addressLine2) addressComponents.push(addressLine2);
-  if (upazila) addressComponents.push(upazila);
-  if (cityTown) addressComponents.push(cityTown);
-  if (district) addressComponents.push(district);
-  if (postalCode) addressComponents.push(postalCode);
+  // De-duplicate exact (case-insensitive) repeated components - e.g. a
+  // Dhaka-city property where cityTown and district are BOTH literally
+  // "Dhaka" previously produced "..., Dhaka, Dhaka, 1213, Bangladesh".
+  // Confirmed by direct testing: that literal repetition measurably
+  // degrades OpenCage's match quality (it fell back to a city-wide
+  // centroid instead of resolving the specific neighbourhood), while the
+  // same address with the duplicate removed resolved much closer to the
+  // correct area. This never drops genuinely different components (e.g.
+  // upazila "Banani" is kept even though addressLine1 also mentions
+  // "Banani" - only whole-component exact repeats are removed).
+  const rawComponents = [
+    addressLine1,
+    addressLine2,
+    upazila,
+    cityTown,
+    district,
+    postalCode,
+  ];
+  const seen = new Set();
+  const addressComponents = [];
+  for (const part of rawComponents) {
+    const trimmed = (part || "").trim();
+    if (!trimmed) continue;
+    const key = trimmed.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    addressComponents.push(trimmed);
+  }
   addressComponents.push("Bangladesh");
 
   return addressComponents.join(", ");
 };
+
+// ============================================================================
+// Helper: does a geocoding result actually land in the requested area?
+// ============================================================================
+// OpenCage's `confidence` score measures how sure it is of its own best
+// guess - it does NOT measure whether that guess is in the neighbourhood
+// the user actually specified. A query OpenCage can't resolve below city
+// level can still come back with a moderate/high confidence city-centroid
+// match (this is exactly what caused a Banani address to silently save
+// Old Dhaka/Islampur coordinates: OpenCage matched only "Dhaka" the city,
+// with no suburb/neighbourhood component at all, yet still returned a
+// confidence high enough for "approximate").
+//
+// Only the finer-grained locality fields are checked (suburb, neighbourhood,
+// quarter, city_district, town, village) - not city/county/state, which are
+// expected to match broadly and don't tell us whether the SPECIFIC area was
+// actually found.
+function getResultLocalityTerms(components) {
+  if (!components) return [];
+  // Deliberately excludes `town`/`city`/`county`/`state`: for Bangladesh
+  // results OpenCage's `town` is frequently just an alias for the city
+  // itself (e.g. town: "Dhaka" on a result that only matched the city as a
+  // whole) - including it would let a generic "Dhaka" match trivially
+  // "match" any requested Dhaka-city upazila, defeating this check
+  // entirely (confirmed while testing the actual buggy Banani result,
+  // which carries exactly that town: "Dhaka" field).
+  return [
+    components.suburb,
+    components.neighbourhood,
+    components.quarter,
+    components.city_district,
+    components.village,
+  ]
+    .filter(Boolean)
+    .map((v) => String(v).toLowerCase());
+}
+
+function areaMatchesRequest(addressData, components) {
+  const requestedTerms = [addressData.upazila, addressData.cityTown]
+    .map((v) => (v || "").trim().toLowerCase())
+    .filter(Boolean);
+  // Nothing specific enough was supplied to check against - don't reject.
+  if (requestedTerms.length === 0) return true;
+
+  // A result whose own postcode matches the user-supplied postcode is
+  // trusted even without a suburb/neighbourhood component: Bangladeshi
+  // postal codes are neighbourhood-sized (e.g. Banani=1213, Gulshan=1212),
+  // so this is an independent, granular confirmation - and OpenCage's
+  // Bangladesh coverage often resolves only to postcode level with no
+  // suburb tag at all, so requiring a suburb tag too would reject many
+  // otherwise-correct matches.
+  if (
+    addressData.postalCode &&
+    components?.postcode &&
+    String(components.postcode).trim() === String(addressData.postalCode).trim()
+  ) {
+    return true;
+  }
+
+  const resultTerms = getResultLocalityTerms(components);
+  // A specific area was requested but the geocoder result has no
+  // neighbourhood-level info at all (only city/state/etc.) and no matching
+  // postcode either - that's the exact failure mode behind the Banani ->
+  // Islampur bug, so treat it as a mismatch rather than trusting the
+  // coordinate anyway.
+  if (resultTerms.length === 0) return false;
+
+  return requestedTerms.some((req) =>
+    resultTerms.some((res) => res.includes(req) || req.includes(res))
+  );
+}
 
 const geocodeAddress = async (addressData) => {
   const fullAddress = constructGeocodingAddress(addressData);
@@ -204,6 +270,26 @@ const geocodeAddress = async (addressData) => {
             `Using fallback coordinates for ${addressData.district}: ${location.lat}, ${location.lng}`
           );
         }
+      } else if (!areaMatchesRequest(addressData, result.components)) {
+        // In-country, but the result doesn't actually mention the
+        // upazila/cityTown the user specified (see areaMatchesRequest) - a
+        // confident-looking match on the wrong neighbourhood is worse than
+        // an honest "we only know the district", so this is never accepted
+        // as precise/approximate. Reuses the same district-centroid
+        // fallback as a total geocoding failure, rather than inventing a
+        // new coordinate.
+        console.warn(
+          `Geocoding result for "${fullAddress}" (formatted: "${result.formatted}") did not match the requested area - falling back to district-level coordinates instead of a mismatched precise/approximate location.`
+        );
+
+        const districtCoordinates = getDistrictCoordinates(
+          addressData.district
+        );
+        if (districtCoordinates) {
+          location.lat = districtCoordinates.lat;
+          location.lng = districtCoordinates.lng;
+        }
+        locationAccuracy = "district-level";
       }
 
       return {
@@ -809,9 +895,10 @@ exports.uploadPropertyImageToS3 = async (req, res) => {
       ACL: "public-read",
     };
 
+    const propertyImagesS3Client = await getPropertyImagesS3Client();
     await propertyImagesS3Client.send(new PutObjectCommand(uploadParams));
 
-    const imageUrl = buildS3ObjectUrl(S3_PROPERTY_IMAGES_BUCKET, fileName);
+    const imageUrl = await buildS3ObjectUrl(S3_PROPERTY_IMAGES_BUCKET, fileName);
     res
       .status(200)
       .json({ message: "Image uploaded successfully", imageUrl: imageUrl });

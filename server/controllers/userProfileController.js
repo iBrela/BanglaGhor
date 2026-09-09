@@ -1,26 +1,13 @@
 const UserProfile = require("../models/UserProfile");
 const path = require("path");
 const Property = require("../models/property.js");
-const { S3Client, PutObjectCommand } = require("@aws-sdk/client-s3");
+const { PutObjectCommand } = require("@aws-sdk/client-s3");
+const {
+  getGovtIdS3Client,
+  buildS3ObjectUrl,
+} = require("../services/s3Provider");
 
-// ============================================================================
-// S3 Client Setup
-// ============================================================================
-const s3Client = new S3Client({
-  region: process.env.APP_AWS_REGION,
-  credentials: {
-    accessKeyId: process.env.APP_AWS_ACCESS_KEY_ID,
-    secretAccessKey: process.env.APP_AWS_SECRET_ACCESS_KEY,
-  },
-});
 const S3_BUCKET = process.env.S3_BUCKET_NAME;
-
-// ============================================================================
-// Helper: Build S3 object URL
-// ============================================================================
-function buildS3ObjectUrl(bucket, key) {
-  return `https://${bucket}.s3.${process.env.APP_AWS_REGION}.amazonaws.com/${key}`;
-}
 
 exports.getMyProfile = async (req, res) => {
   if (!req.user || !req.user.email || !req.user.sub) {
@@ -162,11 +149,12 @@ exports.uploadGovtId = async (req, res) => {
   );
 
   try {
+    const s3Client = await getGovtIdS3Client();
     const command = new PutObjectCommand(params);
     const uploadResult = await s3Client.send(command);
     console.log("S3 Upload Result:", uploadResult);
 
-    const fileUrl = buildS3ObjectUrl(S3_BUCKET, s3Key);
+    const fileUrl = await buildS3ObjectUrl(S3_BUCKET, s3Key);
     console.log(`File uploaded successfully to: ${fileUrl}`);
 
     const userProfile = await UserProfile.findOne({ email: userEmail });

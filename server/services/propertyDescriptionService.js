@@ -644,6 +644,22 @@ async function translate(text, targetLang) {
   result = await tryGroqTranslate(text, targetLang);
   if (result) return result;
 
+  // Both providers failed on the first pass. For a brand-new listing, this
+  // call typically runs moments after generateEnglishDescription() already
+  // made its own Groq call for the same request - if Groq is momentarily
+  // rate-limited from that back-to-back usage (and Gemini is unavailable,
+  // e.g. an invalid/expired key), both providers can fail here even though
+  // either would normally succeed a moment later. One retry after a short
+  // delay gives that transient collision time to clear before this
+  // property permanently ends up with no Bangla (or English) translation.
+  await new Promise((resolve) => setTimeout(resolve, 1500));
+
+  result = await tryGeminiTranslate(text, targetLang);
+  if (result) return result;
+
+  result = await tryGroqTranslate(text, targetLang);
+  if (result) return result;
+
   return "";
 }
 
