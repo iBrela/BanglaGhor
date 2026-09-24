@@ -1,5 +1,5 @@
 import React from "react";
-import { Link as RouterLink } from "react-router-dom";
+import { Link as RouterLink, useNavigate } from "react-router-dom";
 import {
   Box,
   Card,
@@ -20,14 +20,45 @@ import BedIcon from "@mui/icons-material/Bed";
 import BathtubIcon from "@mui/icons-material/Bathtub";
 import SquareFootIcon from "@mui/icons-material/SquareFoot";
 import HomeWorkIcon from "@mui/icons-material/HomeWork";
+import MapIcon from "@mui/icons-material/Map";
 import WishlistButton from "./WishlistButton";
- 
-const PropertyCard = ({ property, isWishlisted, onWishlistToggle }) => {
+import { getPropertyCoordinates } from "../../../shared/propertyLocation";
+
+// showViewOnMap is optional and defaults to off - only FeaturedProperties.js
+// currently enables it. The other existing PropertyCard usages
+// (PropertiesPage.js, Saved.js, MyListingsPage.js) are unaffected.
+const PropertyCard = ({ property, isWishlisted, onWishlistToggle, showViewOnMap = false }) => {
   const theme = useTheme();
- 
+  const navigate = useNavigate();
+
   if (!property || typeof property !== "object" || !property._id) {
     return null;
   }
+
+  // Same safety gate already used by ai_chatbot.js's individual "View on
+  // map" button and MapPage.js's recommendationData: locationAccuracy must
+  // be precise/approximate (a district-level property's geoLocation already
+  // holds a real-looking but generic backend-fallback centroid, which
+  // getPropertyCoordinates() alone can't tell apart from a genuine geocode)
+  // AND getPropertyCoordinates() must return a real coordinate. Never
+  // getPropertyDisplayCoordinates() (division/district centroid fallback).
+  const isVerifiableAccuracy =
+    property.locationAccuracy === "precise" || property.locationAccuracy === "approximate";
+  const canShowOnMap = showViewOnMap && isVerifiableAccuracy && !!getPropertyCoordinates(property);
+
+  // Reuses the exact same router-state contract as ai_chatbot.js's
+  // individual property "View on map" button and MapPage.js's
+  // recommendationData - no new map state format invented.
+  const handleViewOnMap = (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    navigate("/map", {
+      state: {
+        recommendedProperties: [property],
+        recommendationLocation: null,
+      },
+    });
+  };
  
   const placeholderImg = `/pictures/placeholder.png`;
  
@@ -285,6 +316,32 @@ const PropertyCard = ({ property, isWishlisted, onWishlistToggle }) => {
               />
             )}
           </Box>
+
+          {/* View on Map - compact, only for a genuinely usable location.
+              Sits below price/type rather than beside them so it never
+              covers the favourite button, Buy/Rent badge, property-type
+              badge, price, or bed/bath/area figures. */}
+          {canShowOnMap && (
+            <Chip
+              icon={<MapIcon sx={{ fontSize: "0.8rem !important" }} />}
+              label="View on Map"
+              size="small"
+              onClick={handleViewOnMap}
+              clickable
+              variant="outlined"
+              sx={{
+                mt: 1,
+                alignSelf: "flex-start",
+                fontWeight: 600,
+                fontSize: "0.7rem",
+                height: 24,
+                borderRadius: "6px",
+                color: "primary.main",
+                borderColor: "primary.main",
+                bgcolor: alpha(theme.palette.primary.main, 0.06),
+              }}
+            />
+          )}
         </CardContent>
       </Card>
     </RouterLink>

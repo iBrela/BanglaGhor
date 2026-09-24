@@ -169,6 +169,7 @@ const FeaturedProperties = () => {
                   property={property}
                   isWishlisted={wishlist.includes(property._id)}
                   onWishlistToggle={() => toggleWishlist(property._id)}
+                  showViewOnMap
                 />
               </Grid>
             ))}
