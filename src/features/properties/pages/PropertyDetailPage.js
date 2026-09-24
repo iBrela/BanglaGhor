@@ -629,9 +629,28 @@ const PropertyDetailPage = () => {
         </Box>
  
         <TabPanel value={activeTab} index={0}>
+          {/* Shared horizontal boundary for both the heading/Listen row and
+              the description body below, so their left/right edges line up
+              exactly. TabPanel itself already contributes a base px of
+              {xs:2, sm:3} (16px/24px) - this adds a bit more specifically at
+              md/lg so desktop lands in the ~32-40px range requested, while
+              xs/sm stay within the ~16-20px / ~24-32px ranges already
+              provided by TabPanel alone. Deliberately scoped to this one
+              TabPanel (index 0) rather than changing TabPanel's own shared
+              padding, since that's used by the other two tabs too. */}
+          <Box sx={{ px: { xs: 0, md: 1, lg: 2 } }}>
           {/* ── Description heading + audio button ───────────────────────── */}
-          <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", mb: 1 }}>
-            <Typography variant="h6" component="h3" fontWeight="medium">
+          <Box
+            sx={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              flexWrap: "wrap",
+              gap: 1,
+              mb: 1,
+            }}
+          >
+            <Typography variant="h6" component="h3" fontWeight="medium" sx={{ textAlign: "left" }}>
               {t("property_description_heading", "Property Description")}
             </Typography>
             <Tooltip
@@ -679,9 +698,37 @@ const PropertyDetailPage = () => {
           </Box>
           {/* ─────────────────────────────────────────────────────────────── */}
 
-          <Typography variant="body1" paragraph sx={{ color: "text.secondary", whiteSpace: "pre-wrap", lineHeight: 1.7 }}>
+          {/* textAlign: "justify" (not "left") - the page's ancestor .App
+              wrapper (see src/App.css) sets a global text-align: center
+              that this Typography would otherwise silently inherit, so an
+              explicit value is required either way; justify was chosen so
+              the text fills the available width evenly on both edges
+              instead of ragged-right. textJustify: "inter-word" nudges
+              justification to stretch spacing between words rather than
+              within words/glyphs (better for both English and Bangla).
+              Browsers never stretch a paragraph's final line under
+              text-align: justify - that's standard CSS behavior, not
+              something handled here. No maxWidth - width is controlled by
+              the shared px on the wrapping Box above instead, so the text
+              uses the available content width rather than being narrowed
+              into its own column. Works identically for English and Bangla
+              - both are LTR scripts, and getDisplayDescription/displayText
+              already resolve the correct language string upstream, so no
+              separate layout is needed here. */}
+          <Typography
+            variant="body1"
+            paragraph
+            sx={{
+              color: "text.secondary",
+              whiteSpace: "pre-wrap",
+              textAlign: "justify",
+              textJustify: "inter-word",
+              lineHeight: 1.75,
+            }}
+          >
             {displayText(displayedDescription, t("no_description_available", "No description available."))}
           </Typography>
+          </Box>
         </TabPanel>
  
         <TabPanel value={activeTab} index={1}>
