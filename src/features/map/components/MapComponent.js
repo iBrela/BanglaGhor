@@ -158,6 +158,52 @@ function propertiesToGeoJSON(properties) {
 
 const EMPTY_FEATURE_COLLECTION = { type: "FeatureCollection", features: [] };
 
+// Distinct from every existing marker/route color (SELECTED_COLOR/
+// RENT_COLOR/BUY_COLOR/SOLD_COLOR/ROUTE_LINE_COLOR) so a POI marker can
+// never be mistaken for a property marker at a glance.
+const POI_MARKER_COLOR = "#7B1FA2";
+
+// Chatbot recommendation POIs only - already real, backend-verified
+// { name, category, coordinates: [lng, lat] } objects (see MapPage.js's
+// derivation from _amenityMatches). No fetching, no geocoding here; this is
+// purely a display-shape conversion, same role as propertiesToGeoJSON above.
+function poisToGeoJSON(pois) {
+  return {
+    type: "FeatureCollection",
+    features: (pois || [])
+      .filter(
+        (p) =>
+          p &&
+          Array.isArray(p.coordinates) &&
+          p.coordinates.length === 2 &&
+          Number.isFinite(p.coordinates[0]) &&
+          Number.isFinite(p.coordinates[1])
+      )
+      .map((p) => ({
+        type: "Feature",
+        geometry: { type: "Point", coordinates: p.coordinates },
+        properties: {
+          name: p.name || "",
+          category: p.category || "",
+        },
+      })),
+  };
+}
+
+// Minimal HTML escaping for popup content - POI name/category ultimately
+// originate from imported OSM data (see server/models/PointOfInterest.js),
+// not user input, but are still external text being inserted via
+// Popup.setHTML() - escaped defensively rather than trusted blindly.
+function escapeHtml(str) {
+  return String(str || "").replace(/[&<>"']/g, (ch) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;",
+  }[ch]));
+}
+
 // route is the normalized object useRouting/the backend returns
 // ({ distanceMeters, durationSeconds, mode, geometry }) or null - never a
 // raw Valhalla shape, and never decoded here (the backend already returns a
@@ -223,6 +269,17 @@ const MapComponent = ({
   // sync effect below. Entirely independent of the properties source/layers
   // (own source id, own layers, added/removed without touching them).
   route = null,
+  // Optional: chatbot recommendation POIs, [{ name, category, coordinates:
+  // [lng, lat] }] - see poisToGeoJSON above. Independent source/layer, same
+  // pattern as `route`. Existing consumers that never pass this prop behave
+  // exactly as before (defaults to an empty array -> empty POI source).
+  pois = [],
+  // Optional: [[minLng, minLat], [maxLng, maxLat]] - when provided, used
+  // ONCE at mount instead of the default Bangladesh-wide fit (see the mount
+  // effect below). For chatbot recommendation mode with 2+ result points;
+  // MapPage.js handles the single-point case via plain mapCenter/mapZoom
+  // instead, to avoid fitBounds on a zero-area box.
+  initialFitBounds = null,
 }) => {
   const containerRef = useRef(null);
   const mapRef = useRef(null);
@@ -234,6 +291,10 @@ const MapComponent = ({
 
   propertiesRef.current = properties;
   routeRef.current = route;
+  // No poisRef needed: unlike property markers (whose GeoJSON strips most
+  // fields, see propertiesToGeoJSON), the POI popup only needs name/category
+  // - both already embedded directly in poisToGeoJSON's feature.properties,
+  // so the click handler below reads them straight off the clicked feature.
 
   // ── Initialize map once ────────────────────────────────────────────────
   useEffect(() => {
@@ -273,7 +334,20 @@ const MapComponent = ({
     map.on("moveend", handleMove);
     map.on("zoomend", handleMove);
 
-    if (isDefaultNationwideView(mapCenter, mapZoom)) {
+    if (initialFitBounds) {
+      // Chatbot recommendation mode with 2+ result points (MapPage.js only
+      // passes this when there's a genuine multi-point box to fit - the
+      // single-point case uses plain mapCenter/mapZoom below instead, same
+      // branch as any other specific-location request). Same fit-then-derive-
+      // maxBounds shape as the nationwide case below, just fitted to the
+      // recommendation results' own box instead of all of Bangladesh.
+      map.fitBounds(initialFitBounds, { padding: fitPadding, animate: false });
+      const fittedView = map.getBounds();
+      map.setMaxBounds([
+        [fittedView.getWest() - PAN_MARGIN_DEGREES, fittedView.getSouth() - PAN_MARGIN_DEGREES],
+        [fittedView.getEast() + PAN_MARGIN_DEGREES, fittedView.getNorth() + PAN_MARGIN_DEGREES],
+      ]);
+    } else if (isDefaultNationwideView(mapCenter, mapZoom)) {
       // No specific location was requested - fit the whole country into
       // whatever the container's actual size is, instead of trusting a
       // fixed zoom number to work for every screen. fitBounds is purely
@@ -296,8 +370,9 @@ const MapComponent = ({
       ]);
     } else {
       // A specific location was requested (property/search/Locate Me before
-      // mount) - the tight country box is the right constraint from the
-      // start, no fitBounds involved here to conflict with it.
+      // mount, or a single-point chatbot recommendation) - the tight country
+      // box is the right constraint from the start, no fitBounds involved
+      // here to conflict with it.
       map.setMaxBounds(BANGLADESH_BOUNDS);
     }
 
@@ -411,6 +486,59 @@ const MapComponent = ({
       };
       map.on("click", "property-markers", handleMarkerSelect);
       map.on("click", "property-price-label", handleMarkerSelect);
+
+      // ── Chatbot recommendation POIs - independent source/layer, added
+      // after the property layers above so it never affects property
+      // clustering/rendering; empty by default (pois=[] for every existing
+      // consumer that doesn't pass the prop). Visually distinguished from
+      // property markers by an inverted fill/stroke (white fill, colored
+      // ring, vs. property markers' colored fill/white ring) rather than a
+      // new icon/package.
+      map.addSource("pois", {
+        type: "geojson",
+        data: poisToGeoJSON(pois),
+      });
+      map.addLayer({
+        id: "poi-markers",
+        type: "circle",
+        source: "pois",
+        minzoom: MARKER_MIN_ZOOM,
+        paint: {
+          "circle-radius": 6,
+          "circle-color": "#ffffff",
+          "circle-stroke-width": 3,
+          "circle-stroke-color": POI_MARKER_COLOR,
+        },
+      });
+
+      map.on("mouseenter", "poi-markers", () => {
+        map.getCanvas().style.cursor = "pointer";
+      });
+      map.on("mouseleave", "poi-markers", () => {
+        map.getCanvas().style.cursor = "";
+      });
+
+      // Own popup, own layer, own handler - never touches onMarkerClick or
+      // selectedProperty, so it can't interfere with property marker click
+      // handling (property markers stay exactly as clickable as before).
+      // Deliberately no distance/travel-time shown here: those numbers are
+      // only meaningful relative to a specific property, and this generic
+      // popup has no such context (see MapPage.js's dedup, which merges the
+      // same POI across multiple properties into one marker).
+      map.on("click", "poi-markers", (e) => {
+        const feature = e.features?.[0];
+        if (!feature) return;
+        const coords = feature.geometry.coordinates.slice();
+        const name = feature.properties.name || "Point of interest";
+        const category = String(feature.properties.category || "").replace(/_/g, " ");
+        new maplibregl.Popup({ closeButton: true, closeOnClick: true, maxWidth: "220px" })
+          .setLngLat(coords)
+          .setHTML(
+            `<strong>${escapeHtml(name)}</strong>` +
+              (category ? `<br/><span style="text-transform:capitalize">${escapeHtml(category)}</span>` : "")
+          )
+          .addTo(map);
+      });
     });
 
     return () => {
@@ -429,6 +557,16 @@ const MapComponent = ({
       source.setData(propertiesToGeoJSON(properties));
     }
   }, [properties]);
+
+  // ── Sync pois → GeoJSON source when the pois prop changes ──────────────
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !styleLoadedRef.current) return;
+    const source = map.getSource("pois");
+    if (source) {
+      source.setData(poisToGeoJSON(pois));
+    }
+  }, [pois]);
 
   // ── Sync route → GeoJSON source, fit camera to it when it's new ────────
   // Only fires fitBounds when a route actually arrives (new geometry) - not

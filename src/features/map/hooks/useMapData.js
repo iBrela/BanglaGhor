@@ -31,7 +31,16 @@ const normalizeToLatLngObject = (positionInput) => {
   return null;
 };
 
-const useMapData = (initialPropertyCode = null) => {
+const useMapData = (initialPropertyCode = null, options = {}) => {
+  // When true, this hook's own fetch (by-code or full-listing) never runs -
+  // the caller is supplying its own property list (e.g. MapPage's chatbot-
+  // recommendation mode, which already has full property objects from the
+  // chatbot response and must not re-fetch/re-derive them). A stable
+  // primitive (not the raw `options` object, which callers may pass as a
+  // fresh literal every render) so this doesn't destabilize the effect
+  // dependency array below.
+  const skipInitialFetch = !!options.skipInitialFetch;
+
   const [properties, setProperties] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -136,6 +145,14 @@ const useMapData = (initialPropertyCode = null) => {
   );
 
   useEffect(() => {
+    if (skipInitialFetch) {
+      // Nothing to wait for - the caller already has its property list.
+      // Without this, `loading` would stay stuck at its initial `true`
+      // forever (nothing else ever resolves it in this mode), leaving
+      // MapPage's loading spinner shown instead of the map.
+      setLoading(false);
+      return;
+    }
     if (initialPropertyCode) {
       fetchPropertyByCode(initialPropertyCode);
     } else {
@@ -165,7 +182,7 @@ const useMapData = (initialPropertyCode = null) => {
       };
       fetchAllMapProperties();
     }
-  }, [initialPropertyCode, createStableProperty, fetchPropertyByCode]);
+  }, [initialPropertyCode, createStableProperty, fetchPropertyByCode, skipInitialFetch]);
 
   const locateUser = useCallback(() => {
     if (navigator.geolocation) {

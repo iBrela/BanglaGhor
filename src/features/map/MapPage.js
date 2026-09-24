@@ -32,6 +32,7 @@ import InfoIcon from "@mui/icons-material/Info";
 import LocationOnIcon from "@mui/icons-material/LocationOn";
 import HomeWorkIcon from "@mui/icons-material/HomeWork";
 import { useTranslation } from "react-i18next";
+import { getPropertyCoordinates } from "../../shared/propertyLocation";
 import MapComponent from "./components/MapComponent";
 import PropertyInfoPanel from "./components/PropertyInfoPanel";
 import FilterSidebar from "../properties/components/FilterSidebar";
@@ -98,9 +99,111 @@ const MapPage = () => {
   });
   const [showLocationInfo, setShowLocationInfo] = useState(false);
 
+  // ── Chatbot recommendation mode ─────────────────────────────────────────
+  // Detects router state set by ai_chatbot.js's "View on map" button
+  // (navigate("/map", { state: { recommendedProperties, ... } })). Derived
+  // via useMemo (not copied into local state) so it always reflects exactly
+  // what this navigation carried, with no separate sync effect needed - and
+  // recomputes for free if this same MapPage instance is ever re-navigated
+  // to with new state.
+  //
+  // SAFETY: uses getPropertyCoordinates() (real coordinates only, null if
+  // none) - NEVER getPropertyDisplayCoordinates() (which useMapData's own
+  // createStableProperty uses for normal /map browsing, and which falls
+  // back to a division/district centroid for display purposes). A
+  // recommended property with no real geocoded location is silently
+  // excluded from the map here, never plotted at a fake centroid as if it
+  // were the real recommendation.
+  const recommendationData = useMemo(() => {
+    const rawProperties = routerLocation.state?.recommendedProperties;
+    if (!Array.isArray(rawProperties) || rawProperties.length === 0) return null;
+
+    const properties = [];
+    const poiByKey = new Map();
+
+    rawProperties.forEach((rawProperty) => {
+      // Two checks are both required, not just getPropertyCoordinates()
+      // alone: a "district-level" property's geoLocation.coordinates is
+      // NOT empty - the backend already wrote a generic district-centroid
+      // fallback into it at creation time (see propertyController.js's
+      // getDistrictCoordinates()), so getPropertyCoordinates() alone can't
+      // tell a genuinely precise/approximate geocode apart from that
+      // generic centroid; both look like "a real stored coordinate" to it.
+      // locationAccuracy is what actually distinguishes them - the same gate
+      // recommendationService.js's own getVerifiableCoordinates() already
+      // uses server-side, mirrored here so the map can never plot a
+      // district-level property as if it were a precise recommendation.
+      const isVerifiableAccuracy =
+        rawProperty.locationAccuracy === "precise" ||
+        rawProperty.locationAccuracy === "approximate";
+      const coords = isVerifiableAccuracy ? getPropertyCoordinates(rawProperty) : null;
+      if (!coords) return; // no real, trustworthy coordinates - excluded, not faked
+      properties.push({ ...rawProperty, position: coords });
+
+      if (!Array.isArray(rawProperty._amenityMatches)) return;
+      rawProperty._amenityMatches.forEach((match) => {
+        // Only already-verified matches with a real, geolocated POI - never
+        // an unmatched entry, never invented, never a new lookup.
+        if (!match || match.matched !== true || !match.nearestPOI) return;
+        const geo = match.nearestPOI.geoLocation;
+        const poiCoords = geo && geo.coordinates;
+        if (!Array.isArray(poiCoords) || poiCoords.length !== 2) return;
+        const [lng, lat] = poiCoords;
+        if (!Number.isFinite(lng) || !Number.isFinite(lat)) return;
+
+        // Dedup key: category + coordinates rounded to ~4 decimal places
+        // (~10m, matching routingService.js's own established rounding
+        // precedent) - category included so two genuinely different POIs
+        // that happen to sit at the same rounded point are never merged.
+        const key = `${match.category}:${lng.toFixed(4)},${lat.toFixed(4)}`;
+        if (!poiByKey.has(key)) {
+          poiByKey.set(key, {
+            name: match.nearestPOI.name || null,
+            category: match.category,
+            coordinates: [lng, lat],
+          });
+        }
+      });
+    });
+
+    if (properties.length === 0) return null;
+    return { properties, pois: Array.from(poiByKey.values()) };
+  }, [routerLocation.state]);
+
+  // Camera strategy for recommendation mode - computed once from the
+  // (static, derived-from-router-state) recommendation data above. A single
+  // distinct point centers/zooms directly (avoids fitBounds on a zero-area
+  // box); 2+ distinct points fit as a box, reusing MapComponent's own
+  // existing fitBounds logic (see its `initialFitBounds` prop) rather than
+  // duplicating camera math here.
+  const recommendationCamera = useMemo(() => {
+    if (!recommendationData) return null;
+    const allCoords = [
+      ...recommendationData.properties.map((p) => [p.position.lng, p.position.lat]),
+      ...recommendationData.pois.map((p) => p.coordinates),
+    ];
+    if (allCoords.length === 0) return null;
+
+    const uniqueKeys = new Set(
+      allCoords.map(([lng, lat]) => `${lng.toFixed(5)},${lat.toFixed(5)}`)
+    );
+    if (uniqueKeys.size <= 1) {
+      const [lng, lat] = allCoords[0];
+      return { mode: "point", center: [lat, lng], zoom: 15 };
+    }
+
+    let minLng = Infinity, minLat = Infinity, maxLng = -Infinity, maxLat = -Infinity;
+    allCoords.forEach(([lng, lat]) => {
+      if (lng < minLng) minLng = lng;
+      if (lng > maxLng) maxLng = lng;
+      if (lat < minLat) minLat = lat;
+      if (lat > maxLat) maxLat = lat;
+    });
+    return { mode: "bounds", bounds: [[minLng, minLat], [maxLng, maxLat]] };
+  }, [recommendationData]);
 
   const {
-    properties: allMappableProperties, 
+    properties: allMappableProperties,
     loading,
     error,
     userLocation,
@@ -114,7 +217,7 @@ const MapPage = () => {
     fetchPropertyByCode,
     goToLocation,
     restoreMapState,
-  } = useMapData(propertyCode);
+  } = useMapData(propertyCode, { skipInitialFetch: !!recommendationData });
 
   const { results: placeResults, status: placeSearchStatus } =
     useLocationSearch(searchQuery, i18n.language);
@@ -273,7 +376,16 @@ const MapPage = () => {
   }, [propertyCode, selectedProperty, loading, t]);
 
   const filteredMapProperties = useMemo(() => {
-    let propsToFilter = Array.isArray(allMappableProperties)
+    // Recommendation mode substitutes its own (already real-coordinate-only)
+    // property subset for the normal full listing here - the existing
+    // filter pipeline below (price/beds/baths/type/search) then applies to
+    // it exactly as it would to any other property list. Safe because every
+    // filter control resets to its permissive default on a fresh MapPage
+    // mount (a "View on map" click always navigates into a new mount), so
+    // nothing here can unexpectedly hide a just-shown recommendation.
+    let propsToFilter = recommendationData
+      ? [...recommendationData.properties]
+      : Array.isArray(allMappableProperties)
       ? [...allMappableProperties]
       : [];
 
@@ -719,13 +831,27 @@ const MapPage = () => {
         ) : (
           <MapComponent
             properties={filteredMapProperties}
-            mapCenter={mapCenter}
-            mapZoom={mapZoom}
+            mapCenter={
+              recommendationCamera?.mode === "point"
+                ? recommendationCamera.center
+                : mapCenter
+            }
+            mapZoom={
+              recommendationCamera?.mode === "point"
+                ? recommendationCamera.zoom
+                : mapZoom
+            }
             userLocation={userLocation}
             selectedProperty={selectedProperty}
             onMarkerClick={onMarkerPropertySelect}
             onMapMove={handleMapMove}
             route={route}
+            pois={recommendationData ? recommendationData.pois : []}
+            initialFitBounds={
+              recommendationCamera?.mode === "bounds"
+                ? recommendationCamera.bounds
+                : null
+            }
           />
         )}
         {selectedProperty && (

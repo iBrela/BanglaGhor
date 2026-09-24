@@ -65,7 +65,7 @@ const HomeMapPreview = () => {
   return (
     <Box
       sx={{
-        py: 8,
+        py: { xs: 4, md: 5 },
         background: isDark
           ? `linear-gradient(180deg, ${theme.palette.background.default} 0%, ${theme.palette.background.paper} 100%)`
           : `linear-gradient(180deg, ${theme.palette.background.default} 0%, ${alpha(theme.palette.primary.main, 0.04)} 100%)`,
@@ -92,17 +92,14 @@ const HomeMapPreview = () => {
           align="center"
           sx={{ color: "text.primary" }}
         >
-          {t("explore_on_map_title", "Explore Properties on Map")}
+          {t("explore_on_map_title")}
         </Typography>
         <Typography
           variant="body1"
           align="center"
           sx={{ mb: 4, color: "text.secondary" }}
         >
-          {t(
-            "explore_on_map_subtitle",
-            "Find properties visually in your desired locations across Bangladesh."
-          )}
+          {t("explore_on_map_subtitle")}
         </Typography>
  
         <Paper

@@ -9,8 +9,10 @@ import {
   Autocomplete,
   IconButton,
   Tooltip,
+  Tabs,
+  Tab,
 } from "@mui/material";
-import { alpha } from "@mui/material/styles";
+import { alpha, useTheme } from "@mui/material/styles";
 import SearchIcon from "@mui/icons-material/Search";
 import LocationOnIcon from "@mui/icons-material/LocationOn";
 import MicIcon from "@mui/icons-material/Mic";
@@ -30,8 +32,15 @@ const MAX_PROPERTY_MATCHES = 5;
 const HomeSearchBar = () => {
   const navigate = useNavigate();
   const { t, i18n } = useTranslation();
+  const theme = useTheme();
   const [searchQuery, setSearchQuery] = useState("");
   const [allProperties, setAllProperties] = useState([]);
+  // Which /properties/:mode this search targets - "rent" matches the exact
+  // default handleSearch already navigated to before these tabs existed, so
+  // leaving this tab untouched preserves the prior behavior exactly. Buy and
+  // Sold are real, existing routes (see Footer.js/MobileDrawer.js's own
+  // /properties/buy and /properties/sold links) - no new routes introduced.
+  const [activeMode, setActiveMode] = useState("rent");
 
   // ── Speech to text state ──────────────────────────────────────────────────
   const [isListening, setIsListening] = useState(false);
@@ -40,6 +49,11 @@ const HomeSearchBar = () => {
   // ─────────────────────────────────────────────────────────────────────────
 
   const searchContainerRef = useRef(null);
+  // Tracks the Autocomplete's currently keyboard-highlighted suggestion (if
+  // any), so Enter can be wired to trigger a search without breaking
+  // Autocomplete's own existing Enter-to-pick-suggestion behavior - see
+  // handleInputKeyDown below.
+  const highlightedOptionRef = useRef(null);
 
   // ── Check browser speech support ─────────────────────────────────────────
   useEffect(() => {
@@ -163,8 +177,21 @@ const HomeSearchBar = () => {
   const handleSearch = useCallback(() => {
     const queryParams = new URLSearchParams();
     if (searchQuery) queryParams.set("search", searchQuery);
-    navigate(`/properties/rent?${queryParams.toString()}`);
-  }, [navigate, searchQuery]);
+    navigate(`/properties/${activeMode}?${queryParams.toString()}`);
+  }, [navigate, searchQuery, activeMode]);
+
+  // Enter triggers the same handleSearch the Search button already calls -
+  // but only when no dropdown suggestion is keyboard-highlighted, so
+  // Autocomplete's own existing Enter-to-pick-a-suggestion behavior (handled
+  // separately via onChange/handleOptionSelect) is never double-fired.
+  const handleInputKeyDown = useCallback(
+    (event) => {
+      if (event.key === "Enter" && !highlightedOptionRef.current) {
+        handleSearch();
+      }
+    },
+    [handleSearch]
+  );
 
   // Selecting a Place navigates to /map and hands off just the coordinates +
   // Photon's own "type" via React Router navigation state (the same
@@ -196,29 +223,64 @@ const HomeSearchBar = () => {
     <>
       <Paper
         ref={searchContainerRef}
-        elevation={3}
+        elevation={0}
         sx={{
-          p: { xs: 1.5, sm: 2 },
-          display: "flex",
-          flexDirection: { xs: "column", md: "row" },
-          alignItems: "stretch",
-          gap: 1.5,
-          borderRadius: "12px",
-          mt: { xs: 4, md: -4 },
-          mb: { xs: 4, md: 6 },
+          p: { xs: 1.5, sm: 2.5 },
+          borderRadius: "14px",
+          // Renders in-flow inside HeroSection's own centered column now
+          // (see HeroSection.js) - no negative margin/overlap trick needed.
+          // Width is intentionally controlled (~70% of the hero's content
+          // width on desktop, capped) so the panel reads as a focused
+          // search tool rather than a full-width bar.
+          width: "100%",
+          maxWidth: { xs: "100%", sm: 480, md: 820 },
           zIndex: 10,
           position: "relative",
           backgroundColor: "background.paper",
-          maxWidth: "950px",
+          boxShadow: "0 12px 32px rgba(0,0,0,0.25)",
           mx: "auto",
         }}
         onClick={(e) => e.stopPropagation()}
       >
+        <Tabs
+          value={activeMode}
+          onChange={(event, newMode) => setActiveMode(newMode)}
+          centered
+          sx={{ minHeight: 40, mb: 1 }}
+        >
+          <Tab
+            value="buy"
+            label={t("nav_buy")}
+            sx={{ minHeight: 40, py: 0.5, fontSize: "0.95rem", "&.Mui-selected": { fontWeight: 800 } }}
+          />
+          <Tab
+            value="rent"
+            label={t("nav_rent")}
+            sx={{ minHeight: 40, py: 0.5, fontSize: "0.95rem", "&.Mui-selected": { fontWeight: 800 } }}
+          />
+          <Tab
+            value="sold"
+            label={t("nav_sold")}
+            sx={{ minHeight: 40, py: 0.5, fontSize: "0.95rem", "&.Mui-selected": { fontWeight: 800 } }}
+          />
+        </Tabs>
+
+        <Box
+          sx={{
+            display: "flex",
+            flexDirection: { xs: "column", md: "row" },
+            alignItems: "stretch",
+            gap: 1.5,
+          }}
+        >
         <Autocomplete
           freeSolo
           filterOptions={(x) => x}
           options={searchOptions}
           loading={placeSearchStatus === "loading"}
+          onHighlightChange={(event, option) => {
+            highlightedOptionRef.current = option;
+          }}
           inputValue={searchQuery}
           onInputChange={(event, newValue, reason) => {
             if (reason === "input") setSearchQuery(newValue);
@@ -317,6 +379,10 @@ const HomeSearchBar = () => {
                 isListening ? "🎤 Listening..." : t("search_placeholder")
               }
               onFocus={() => {}}
+              onKeyDown={(event) => {
+                params.inputProps?.onKeyDown?.(event);
+                handleInputKeyDown(event);
+              }}
               InputProps={{
                 ...params.InputProps,
                 startAdornment: (
@@ -335,21 +401,25 @@ const HomeSearchBar = () => {
                             onClick={handleMicToggle}
                             size="small"
                             sx={{
-                              color: isListening ? "#FF5F40" : "#7BAFC0",
+                              color: isListening
+                                ? theme.palette.secondary.main
+                                : theme.palette.text.secondary,
                               backgroundColor: isListening
-                                ? alpha("#FF5F40", 0.12)
+                                ? alpha(theme.palette.secondary.main, 0.12)
                                 : "transparent",
                               animation: isListening ? "pulse 1.2s infinite" : "none",
                               "@keyframes pulse": {
-                                "0%": { boxShadow: "0 0 0 0 rgba(255,95,64,0.4)" },
-                                "70%": { boxShadow: "0 0 0 8px rgba(255,95,64,0)" },
-                                "100%": { boxShadow: "0 0 0 0 rgba(255,95,64,0)" },
+                                "0%": { boxShadow: `0 0 0 0 ${alpha(theme.palette.secondary.main, 0.4)}` },
+                                "70%": { boxShadow: `0 0 0 8px ${alpha(theme.palette.secondary.main, 0)}` },
+                                "100%": { boxShadow: `0 0 0 0 ${alpha(theme.palette.secondary.main, 0)}` },
                               },
                               "&:hover": {
                                 backgroundColor: isListening
-                                  ? alpha("#FF5F40", 0.2)
-                                  : alpha("#00D4E8", 0.1),
-                                color: isListening ? "#FF5F40" : "#00D4E8",
+                                  ? alpha(theme.palette.secondary.main, 0.2)
+                                  : alpha(theme.palette.primary.main, 0.1),
+                                color: isListening
+                                  ? theme.palette.secondary.main
+                                  : theme.palette.primary.main,
                               },
                             }}
                           >
@@ -363,10 +433,12 @@ const HomeSearchBar = () => {
                 // ─────────────────────────────────────────────────────────────
                 sx: {
                   borderRadius: "8px",
-                  bgcolor: alpha("#EFF9FE", 0.5),
-                  // cyan outline when listening
+                  bgcolor: alpha(theme.palette.primary.main, 0.04),
+                  // coral outline when listening
                   ...(isListening && {
-                    "& fieldset": { borderColor: "#FF5F40 !important" },
+                    "& fieldset": {
+                      borderColor: `${theme.palette.secondary.main} !important`,
+                    },
                   }),
                 },
               }}
@@ -386,15 +458,16 @@ const HomeSearchBar = () => {
             borderRadius: "8px",
             flexShrink: 0,
             height: "56px",
-            boxShadow: "0 4px 12px rgba(43, 123, 140, 0.2)",
+            boxShadow: `0 4px 12px ${alpha(theme.palette.primary.main, 0.2)}`,
             "&:hover": {
-              bgcolor: "#246A77",
-              boxShadow: "0 6px 16px rgba(43, 123, 140, 0.3)",
+              bgcolor: theme.palette.primary.dark,
+              boxShadow: `0 6px 16px ${alpha(theme.palette.primary.main, 0.3)}`,
             },
           }}
         >
           {t("search_button")}
         </Button>
+        </Box>
       </Paper>
     </>
   );

@@ -10,11 +10,17 @@
 const Groq = require("groq-sdk");
 const Property = require("../models/property");
 const locationService = require("./locationService");
+const recommendationService = require("./recommendationService");
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
 const CONFIG = {
-  MODEL: "llama-3.3-70b-versatile",
+  // llama-3.3-70b-versatile was decommissioned by Groq (model_not_found).
+  // openai/gpt-oss-120b is a reasoning model - it spends completion tokens
+  // on an internal "reasoning" pass before the actual reply text, so
+  // reasoning_effort: "low" below is required, not optional, to leave
+  // enough of MAX_TOKENS for the real reply.
+  MODEL: "openai/gpt-oss-120b",
   TEMPERATURE: 0.3,
   MAX_TOKENS: 500,
 
@@ -37,6 +43,7 @@ function buildBaseQuery(intent) {
   var query = {
     listingStatus: { $in: ["available"] },
     isHidden: { $ne: true },
+    isDeleted: { $ne: true },
   };
 
   var filters = intent.filters || {};
@@ -71,7 +78,7 @@ function buildBaseQuery(intent) {
 async function searchWithinRadius(intent, centerCoords, radiusKm, withFilters) {
   var query = withFilters
     ? buildBaseQuery(intent)
-    : { listingStatus: { $in: ["available"] }, isHidden: { $ne: true } };
+    : { listingStatus: { $in: ["available"] }, isHidden: { $ne: true }, isDeleted: { $ne: true } };
 
   // Only keep listingType when relaxing
   if (!withFilters && intent.filters && intent.filters.listingType) {
@@ -148,6 +155,11 @@ async function generateReply(params) {
   var matchedLabel = params.matchedLabel;
   var filtersUsed = params.filtersUsed;
   var language = params.language;
+  // Only present when the user actually requested amenities (see runRAG) -
+  // when absent/empty, every amenity-specific line below is skipped, so the
+  // prompt text is byte-identical to before this feature existed.
+  var amenities = params.amenities || [];
+  var amenitiesRequested = amenities.length > 0;
 
   var hasResults = properties.length > 0;
 
@@ -198,6 +210,40 @@ async function generateReply(params) {
       line += " — " + p._distanceKm.toFixed(1) + " km from " + locationName;
     }
     contextLines.push(line);
+
+    // Amenity evidence lines - ONLY real, backend-computed facts (see
+    // recommendationService.js). Never invents a POI or a distance: a
+    // requested category with no real nearby match is listed as NOT
+    // VERIFIED, never silently omitted or guessed at.
+    if (amenitiesRequested && Array.isArray(p._amenityMatches)) {
+      if (p._hasVerifiableLocation === false) {
+        contextLines.push("   (this property's location is not precise enough to verify nearby amenities)");
+      }
+      p._amenityMatches.forEach(function (m) {
+        if (m.matched) {
+          var poiName = m.nearestPOI.name || ("a nearby " + m.category.replace(/_/g, " "));
+          // Geospatial (straight-line) distance is always shown - the only
+          // fact ragService itself guarantees for every match. Travel time
+          // is appended ONLY when recommendationService's Valhalla
+          // enrichment actually succeeded for this exact POI - never
+          // estimated, never derived from the straight-line figure.
+          var line = "   - " + m.category + ": VERIFIED nearby — " + poiName +
+            " (" + m.nearestPOI.distanceMeters + "m away geographically";
+          if (m.travel && typeof m.travel.durationMinutes === "number") {
+            line += ", ~" + m.travel.durationMinutes + " min " + m.travel.mode + " per routing service";
+          }
+          line += ")";
+          contextLines.push(line);
+        } else {
+          var withinNote = m.requestedMaxDistanceKm
+            ? " within " + m.requestedMaxDistanceKm + " km"
+            : "";
+          contextLines.push(
+            "   - " + m.category + ": NOT VERIFIED nearby" + withinNote + " (no matching real data found)"
+          );
+        }
+      });
+    }
   });
 
   var propertyContext = contextLines.length > 0
@@ -218,6 +264,17 @@ async function generateReply(params) {
     "3. Be HONEST about distance. If properties are far, say so naturally.",
     "4. Keep reply SHORT — maximum 3 sentences.",
     "5. Format prices: '৳45,000/month' — never raw numbers.",
+  ].concat(
+    amenitiesRequested
+      ? [
+          "6. Only mention a nearby amenity/POI if its line above says VERIFIED nearby - never invent or assume one.",
+          "7. Only state the exact distance given next to a VERIFIED amenity (e.g. '420m away') - never estimate.",
+          "8. If an amenity is marked NOT VERIFIED nearby, honestly tell the user it could not be confirmed near that property - never imply it matched.",
+          "9. The properties above are already ranked by how well they match the requested amenities - present them in that order; do not re-rank or reorder them yourself.",
+          "10. Only mention a travel time (e.g. '~5 min driving') if it appears explicitly next to a VERIFIED amenity above - never estimate one, and never convert the geographic meters distance into a travel time yourself. If no travel time is shown, only mention the geographic distance.",
+        ]
+      : []
+  ).concat([
     "",
     "SITUATION:",
     matchContext,
@@ -233,7 +290,7 @@ async function generateReply(params) {
             "- Close with a question.")
       : "- Be HONEST: say no properties were found within 100 km of " + locationName + ".\n" +
         "- Suggest the user try a major city or adjust their budget.",
-  ].join("\n");
+  ]).join("\n");
 
   var userPrompt =
     "USER MESSAGE: \"" + userMessage + "\"\n" +
@@ -250,6 +307,7 @@ async function generateReply(params) {
       ],
       temperature: CONFIG.TEMPERATURE,
       max_tokens: CONFIG.MAX_TOKENS,
+      reasoning_effort: "low",
     });
 
     var reply = completion.choices[0] && completion.choices[0].message
@@ -346,6 +404,7 @@ async function runRAG(params) {
       basicResults = await Property.find({
         listingStatus: { $in: ["available"] },
         isHidden: { $ne: true },
+        isDeleted: { $ne: true },
       }).limit(CONFIG.MAX_RESULTS).lean();
     }
     searchResult = {
@@ -359,6 +418,37 @@ async function runRAG(params) {
   // ─── STEP 3: ADD DISTANCES ──────────────────────────────────────
   var properties = addDistanceInfo(searchResult.properties, centerCoords);
 
+  // ─── STEP 3.5: AMENITY-AWARE ANALYSIS + DETERMINISTIC RANKING ──────
+  // Only runs when the user actually requested amenities - a normal search
+  // never pays this cost and the reply prompt below stays byte-identical to
+  // before. Ranking is computed entirely from real property/POI data here
+  // (recommendationService.js) - the LLM below only ever explains it.
+  var amenities = (intent.amenities && intent.amenities.length > 0) ? intent.amenities : [];
+  if (amenities.length > 0 && properties.length > 0) {
+    var evidenceList = await recommendationService.analyzeCandidates(properties, amenities);
+    // Travel-time refinement (Valhalla) - optional, additive, non-fatal.
+    // Only routes to amenities that already matched geospatially above;
+    // never changes matched/unmatched; a Valhalla failure just leaves
+    // every amenityMatches[].travel as null (see recommendationService.js's
+    // enrichWithTravelTime for the full failure-handling rationale). Must
+    // run BEFORE ranking, since rankEvidence uses travel data as a tie-break.
+    evidenceList = await recommendationService.enrichWithTravelTime(evidenceList);
+    var ranked = recommendationService.rankEvidence(evidenceList);
+    // Reorder `properties` to the deterministic ranking and attach each
+    // property's evidence directly onto it (same underscore-prefixed
+    // convention as _distanceKm/_matchType below), so the existing response
+    // shape/contract is unchanged - old consumers ignoring these fields see
+    // no difference, and the existing frontend property cards keep working.
+    properties = ranked.map(function (ev) {
+      return Object.assign({}, ev.property, {
+        _amenityMatches: ev.amenityMatches,
+        _matchedAmenityCount: ev.matchedAmenityCount,
+        _requestedAmenityCount: ev.requestedAmenityCount,
+        _hasVerifiableLocation: ev.hasVerifiableLocation,
+      });
+    });
+  }
+
   // ─── STEP 4: GENERATE REPLY ─────────────────────────────────────
   var reply = await generateReply({
     userMessage: userMessage,
@@ -368,6 +458,7 @@ async function runRAG(params) {
     matchedLabel: searchResult.matchedLabel,
     filtersUsed: searchResult.filtersUsed,
     language: intent.language,
+    amenities: amenities,
   });
 
   // ─── STEP 5: TAG PROPERTIES BY MATCH QUALITY ────────────────────
@@ -399,6 +490,10 @@ async function runRAG(params) {
       matchedLabel: searchResult.matchedLabel,
       filtersUsed: searchResult.filtersUsed,
       propertyCount: taggedProperties.length,
+      // Backward-compatible addition: existing consumers that ignore this
+      // (and the per-property _amenityMatches/_matchedAmenityCount fields
+      // above) see no change at all.
+      amenitiesRequested: amenities.length > 0,
     },
   };
 }

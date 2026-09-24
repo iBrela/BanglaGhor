@@ -8,11 +8,12 @@ import {
   CircularProgress,
 } from "@mui/material";
 import ArrowForwardIcon from "@mui/icons-material/ArrowForward";
+import { useTheme, alpha } from "@mui/material/styles";
 import axios from "axios";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useAuth } from "../../../context/AuthContext";
-import PropertyCard from "../../properties/components/PropertyCard"; 
+import PropertyCard from "../../properties/components/PropertyCard";
 
 const API_BASE_URL =
   process.env.REACT_APP_API_URL || "http://localhost:5001/api";
@@ -20,6 +21,7 @@ const API_BASE_URL =
 const FeaturedProperties = () => {
   const navigate = useNavigate();
   const { t } = useTranslation();
+  const theme = useTheme();
   const { isLoggedIn, user, idToken } = useAuth();
   const [properties, setProperties] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -101,14 +103,14 @@ const FeaturedProperties = () => {
   };
 
   return (
-    <Box sx={{ py: 6, bgcolor: "rgba(43, 123, 140, 0.03)" }}>
+    <Box sx={{ py: { xs: 4, md: 5 }, bgcolor: alpha(theme.palette.primary.main, 0.03) }}>
       <Container maxWidth="lg">
         <Box
           sx={{
             display: "flex",
             justifyContent: "space-between",
             alignItems: "center",
-            mb: 4, 
+            mb: 3,
             flexWrap: "wrap",
             gap: 2,
           }}

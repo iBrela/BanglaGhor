@@ -141,7 +141,13 @@ function containsBangla(str) {
 async function translateBanglaToEnglish(banglaQuery) {
   try {
     const completion = await groq.chat.completions.create({
-      model: "llama-3.3-70b-versatile",
+      // llama-3.3-70b-versatile was decommissioned by Groq (model_not_found).
+      // openai/gpt-oss-120b is a reasoning model - it spends completion
+      // tokens on an internal "reasoning" pass before the actual answer, so
+      // with the small max_tokens: 50 budget below, reasoning_effort: "low"
+      // is required (confirmed live: without it, reasoning alone consumed
+      // the full 50-token budget and returned an empty string).
+      model: "openai/gpt-oss-120b",
       messages: [
         {
           role: "system",
@@ -161,6 +167,7 @@ async function translateBanglaToEnglish(banglaQuery) {
       ],
       temperature: 0,
       max_tokens: 50,
+      reasoning_effort: "low",
     });
 
     const translated = completion.choices[0]?.message?.content?.trim();

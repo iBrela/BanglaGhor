@@ -26,7 +26,8 @@ import {
   Fade,
   Tooltip,
 } from "@mui/material";
-import { Link as RouterLink } from "react-router-dom";
+import { Link as RouterLink, useNavigate } from "react-router-dom";
+import { getPropertyCoordinates } from "../../../shared/propertyLocation";
 
 // Icons
 import ChatBubbleOutlineIcon from "@mui/icons-material/ChatBubbleOutline";
@@ -41,6 +42,26 @@ import SquareFootIcon from "@mui/icons-material/SquareFoot";
 import HomeWorkIcon from "@mui/icons-material/HomeWork";
 import NearMeIcon from "@mui/icons-material/NearMe";
 import RefreshIcon from "@mui/icons-material/Refresh";
+import MapIcon from "@mui/icons-material/Map";
+// Amenity-category icons (Part 2 of the property-card "near your
+// preferences" section) - all from the already-installed @mui/icons-material
+// package, no new icon library added.
+import LocalHospitalIcon from "@mui/icons-material/LocalHospital";
+import LocalPharmacyIcon from "@mui/icons-material/LocalPharmacy";
+import SchoolIcon from "@mui/icons-material/School";
+import ParkIcon from "@mui/icons-material/Park";
+import StorefrontIcon from "@mui/icons-material/Storefront";
+import PlaceIcon from "@mui/icons-material/Place";
+import LocalPoliceIcon from "@mui/icons-material/LocalPolice";
+import LocalFireDepartmentIcon from "@mui/icons-material/LocalFireDepartment";
+import DirectionsBusIcon from "@mui/icons-material/DirectionsBus";
+import TrainIcon from "@mui/icons-material/Train";
+import DirectionsBoatIcon from "@mui/icons-material/DirectionsBoat";
+import AccountBalanceIcon from "@mui/icons-material/AccountBalance";
+import LocalAtmIcon from "@mui/icons-material/LocalAtm";
+import DirectionsCarIcon from "@mui/icons-material/DirectionsCar";
+import DirectionsWalkIcon from "@mui/icons-material/DirectionsWalk";
+import DirectionsBikeIcon from "@mui/icons-material/DirectionsBike";
 
 // ============================================================================
 // CONSTANTS
@@ -62,6 +83,7 @@ const TRANSLATIONS = {
     clearChat: "Clear conversation",
     confirmClear: "Clear conversation history?",
     aboutAway: "away",
+    fromLocation: "from",
     bedsLabel: "Beds",
     bathsLabel: "Baths",
     sqftLabel: "sqft",
@@ -73,6 +95,14 @@ const TRANSLATIONS = {
     sectionRegional: "In the surrounding region",
     withinKm: "within",
     km: "km",
+    m: "m",
+    viewOnMap: "View on map",
+    viewAllOnMap: "View all on map",
+    nearYourPreferences: "Near your preferences",
+    minLabel: "min",
+    travelModeDriving: "drive",
+    travelModeWalking: "walk",
+    travelModeCycling: "cycle",
   },
   bn: {
     title: "BanglaGhor AI",
@@ -86,6 +116,7 @@ const TRANSLATIONS = {
     clearChat: "চ্যাট মুছুন",
     confirmClear: "চ্যাট হিস্ট্রি মুছে ফেলতে চান?",
     aboutAway: "দূরে",
+    fromLocation: "থেকে",
     bedsLabel: "বেড",
     bathsLabel: "বাথ",
     sqftLabel: "বর্গফুট",
@@ -96,8 +127,126 @@ const TRANSLATIONS = {
     sectionRegional: "আশেপাশের এলাকায়",
     withinKm: "মধ্যে",
     km: "কিমি",
+    m: "মি",
+    viewOnMap: "ম্যাপে দেখুন",
+    viewAllOnMap: "সবগুলো ম্যাপে দেখুন",
+    nearYourPreferences: "আপনার পছন্দের কাছাকাছি",
+    minLabel: "মিনিট",
+    travelModeDriving: "গাড়িতে",
+    travelModeWalking: "হেঁটে",
+    travelModeCycling: "সাইকেলে",
   },
 };
+
+// ============================================================================
+// HELPER: Build a trustworthy locality label for the compact card
+// ============================================================================
+// No shared property/location display helper existed for locality TEXT
+// (src/shared/propertyLocation.js only handles coordinates); the other
+// three components that build a location string (PropertyCard.js,
+// PropertyInfoPanel.js, PropertyDetailPage.js) each do it inline and are
+// out of scope for this change - so this is a small, local helper, scoped
+// to this file only.
+//
+// Prefers `upazila` over `cityTown`: a read-only data-quality audit of the
+// live property collection found cityTown inconsistent with
+// upazila/geocodedAddress in 26/60 (43%) of records, while upazila was
+// reliably corroborated by the real geocoded address in every case checked
+// (e.g. "Apartment for buy #22": cityTown="Motijheel" is wrong,
+// upazila="Gulshan" is correct). Never invents a locality - only ever
+// picks among the property's own already-stored fields.
+function buildLocalityLabel(property) {
+  if (!property) return null;
+  var primary = property.upazila || property.cityTown || null;
+  var district = property.district || null;
+
+  var parts = [];
+  if (primary) parts.push(primary);
+  // Avoid duplicate output like "Dhaka, Dhaka" or "Banani, Banani".
+  if (
+    district &&
+    (!primary || district.trim().toLowerCase() !== primary.trim().toLowerCase())
+  ) {
+    parts.push(district);
+  }
+
+  return parts.length > 0 ? parts.join(", ") : null;
+}
+
+// ============================================================================
+// HELPER: Amenity category -> icon (all 16 categories intentService.js can
+// extract - see server/services/intentService.js's AMENITY MAPPING RULES).
+// PlaceIcon is the "suitable neutral place icon" fallback for any category
+// not explicitly mapped (currently only place_of_worship, deliberately kept
+// neutral since it can mean mosque, temple, or church).
+// ============================================================================
+var AMENITY_ICON_MAP = {
+  hospital: LocalHospitalIcon,
+  clinic: LocalHospitalIcon,
+  pharmacy: LocalPharmacyIcon,
+  school: SchoolIcon,
+  college: SchoolIcon,
+  university: SchoolIcon,
+  park: ParkIcon,
+  marketplace: StorefrontIcon,
+  place_of_worship: PlaceIcon,
+  police: LocalPoliceIcon,
+  fire_station: LocalFireDepartmentIcon,
+  bus_station: DirectionsBusIcon,
+  railway_station: TrainIcon,
+  ferry_terminal: DirectionsBoatIcon,
+  bank: AccountBalanceIcon,
+  atm: LocalAtmIcon,
+};
+
+var TRAVEL_ICON_MAP = {
+  driving: DirectionsCarIcon,
+  walking: DirectionsWalkIcon,
+  cycling: DirectionsBikeIcon,
+};
+
+// ============================================================================
+// HELPER: Format a POI distance (property -> requested amenity, i.e.
+// nearestPOI.distanceMeters - a real backend geospatial value, never
+// invented or derived here). Deliberately separate from property._distanceKm
+// (searched location -> property, shown in the distance badge/reply text) -
+// the two are different measurements and must never be conflated.
+// ============================================================================
+function formatDistanceMeters(distanceMeters, t) {
+  if (typeof distanceMeters !== "number" || !isFinite(distanceMeters)) return null;
+  if (distanceMeters < 1000) {
+    return Math.round(distanceMeters) + " " + t("m");
+  }
+  return (distanceMeters / 1000).toFixed(1) + " " + t("km");
+}
+
+// ============================================================================
+// HELPER: Format a Valhalla-backed travel-time label (e.g. "1.1 min drive" /
+// "গাড়িতে ১.১ মিনিট"). Only ever renders backend-provided
+// match.travel.durationMinutes - never estimates or calculates travel time
+// on the frontend. Returns null (renders nothing) whenever travel is null,
+// which callers must treat as a normal, non-error state (see
+// recommendationService.js's enrichWithTravelTime: a Valhalla failure or an
+// unsolved matrix cell just leaves travel as null, by design).
+// ============================================================================
+function formatTravelText(travel, language, t) {
+  if (!travel || typeof travel.durationMinutes !== "number" || !isFinite(travel.durationMinutes)) {
+    return null;
+  }
+  var duration = travel.durationMinutes;
+  var durationStr = duration < 10 ? duration.toFixed(1) : String(Math.round(duration));
+  var modeKey =
+    travel.mode === "walking"
+      ? "travelModeWalking"
+      : travel.mode === "cycling"
+      ? "travelModeCycling"
+      : "travelModeDriving";
+  var modeWord = t(modeKey);
+  if (language === "bn") {
+    return modeWord + " " + durationStr + " " + t("minLabel");
+  }
+  return durationStr + " " + t("minLabel") + " " + modeWord;
+}
 
 // ============================================================================
 // HELPER: Resolve image source (matches PropertyCard logic)
@@ -121,7 +270,19 @@ function resolveImageSrc(property) {
 function MiniPropertyCard(props) {
   var property = props.property;
   var t = props.t;
+  var language = props.language;
+  // The searched location's own human-readable name (e.g. "Banani",
+  // "Gulshan") - reused as-is from the backend's existing
+  // metadata.geocodedLocation.name (see ragService.js's runRAG, already
+  // returned by POST /api/ai/chatbot). Never re-parsed or re-geocoded here.
+  var searchLocationName = props.locationName;
+  // The chatbot response's own metadata.geocodedLocation object (not just
+  // its name) - carried through unchanged to the property-level "View on
+  // map" navigation, exactly like the existing message-level
+  // handleViewOnMap's recommendationLocation. Never re-geocoded here.
+  var recommendationLocation = props.recommendationLocation || null;
   var theme = useTheme();
+  var navigate = useNavigate();
 
   if (!property || !property._id) return null;
 
@@ -133,6 +294,39 @@ function MiniPropertyCard(props) {
     e.target.src = placeholderImg;
   }
 
+  // PART 1: only backend-verified, requested amenity matches - never a
+  // generic/unmatched POI, never independently re-sorted (preserves the
+  // order _amenityMatches already arrives in).
+  var verifiedAmenities = Array.isArray(property._amenityMatches)
+    ? property._amenityMatches.filter(function (m) {
+        return !!(m && m.matched === true && m.nearestPOI);
+      })
+    : [];
+
+  // PART 5: same double-check as MapPage's recommendationData / the
+  // message-level button above - locationAccuracy must be precise/
+  // approximate (a district-level property's geoLocation already holds a
+  // real-looking but generic backend-fallback centroid, which
+  // getPropertyCoordinates() alone can't distinguish from a genuine
+  // geocode) AND getPropertyCoordinates() must return a real coordinate.
+  var isVerifiableAccuracy =
+    property.locationAccuracy === "precise" || property.locationAccuracy === "approximate";
+  var showPropertyMapButton = isVerifiableAccuracy && !!getPropertyCoordinates(property);
+
+  function handlePropertyViewOnMap(e) {
+    // Card is a RouterLink to the property details page - stop that
+    // navigation (and its own click bubbling) so this button's click
+    // exclusively triggers the map navigation below.
+    e.preventDefault();
+    e.stopPropagation();
+    navigate("/map", {
+      state: {
+        recommendedProperties: [property],
+        recommendationLocation: recommendationLocation,
+      },
+    });
+  }
+
   var displayPrice;
   if (property.price !== null && property.price !== undefined) {
     var suffix = property.listingType === "rent" ? t("rentSuffix") : "";
@@ -141,10 +335,7 @@ function MiniPropertyCard(props) {
     displayPrice = "Price N/A";
   }
 
-  var locationParts = [];
-  if (property.cityTown) locationParts.push(property.cityTown);
-  if (property.district) locationParts.push(property.district);
-  var locationString = locationParts.join(", ") || "Location N/A";
+  var locationString = buildLocalityLabel(property) || "Location N/A";
 
   var detailUrl = "/properties/details/" + property._id;
   var isLandOrCommercial =
@@ -155,9 +346,36 @@ function MiniPropertyCard(props) {
       ? alpha(theme.palette.secondary.main, 0.9)
       : alpha(theme.palette.primary.main, 0.9);
 
+  // This badge is ALWAYS "searched location -> property" distance
+  // (property._distanceKm, computed by ragService.js's addDistanceInfo) -
+  // never a POI/amenity distance, which is a separate value shown only in
+  // the chat reply text (see recommendationService.js / generateReply()).
+  //
+  // Same locationAccuracy gate as the preference section / property-level
+  // map button above: a district-level property's coordinate is a generic
+  // backend-fallback centroid, not a real geocode, so a distance measured
+  // from it ("2.3 km from Banani") would misrepresent how close the
+  // property actually is. _distanceKm itself is untouched - this only
+  // controls whether the badge is presented.
   var distanceText = null;
-  if (property._distanceKm !== null && property._distanceKm !== undefined) {
-    distanceText = property._distanceKm.toFixed(1) + " km " + t("aboutAway");
+  if (
+    isVerifiableAccuracy &&
+    property._distanceKm !== null &&
+    property._distanceKm !== undefined
+  ) {
+    var kmStr = property._distanceKm.toFixed(1);
+    if (searchLocationName) {
+      // "0.6 km from Banani" (en) / "বনানী থেকে ০.৬ কিমি" (bn - location
+      // first, matching this file's existing bn word-order convention, see
+      // buildSectionLabel above).
+      distanceText = language === "bn"
+        ? searchLocationName + " " + t("fromLocation") + " " + kmStr + " " + t("km")
+        : kmStr + " km " + t("fromLocation") + " " + searchLocationName;
+    } else {
+      // Graceful fallback when no reliable searched-location label is
+      // available - never invents one.
+      distanceText = kmStr + " km " + t("aboutAway");
+    }
   }
 
   return (
@@ -299,6 +517,71 @@ function MiniPropertyCard(props) {
           </Box>
         ) : null}
 
+        {verifiedAmenities.length > 0 && (
+          <Box sx={{ mb: 1 }}>
+            <Typography
+              variant="caption"
+              sx={{
+                display: "block",
+                fontWeight: 700,
+                fontSize: "0.62rem",
+                color: "text.secondary",
+                textTransform: "uppercase",
+                letterSpacing: 0.4,
+                mb: 0.5,
+              }}
+            >
+              {t("nearYourPreferences")}
+            </Typography>
+            <Box sx={{ display: "flex", flexDirection: "column", gap: 0.5 }}>
+              {verifiedAmenities.map(function (m, mi) {
+                var IconComp = AMENITY_ICON_MAP[m.category] || PlaceIcon;
+                var distanceLabel = formatDistanceMeters(m.nearestPOI.distanceMeters, t);
+                var travelText = formatTravelText(m.travel, language, t);
+                var TravelIconComp = (m.travel && TRAVEL_ICON_MAP[m.travel.mode]) || DirectionsCarIcon;
+                return (
+                  <Box key={(m.category || "amenity") + "-" + mi} sx={{ display: "flex", flexDirection: "column" }}>
+                    <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 0.5 }}>
+                      <Box sx={{ display: "flex", alignItems: "center", gap: 0.4, overflow: "hidden" }}>
+                        <IconComp sx={{ fontSize: "0.8rem", color: theme.palette.primary.main, flexShrink: 0 }} />
+                        <Typography
+                          variant="caption"
+                          title={m.nearestPOI.name || ""}
+                          sx={{
+                            fontSize: "0.68rem",
+                            color: "text.primary",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          {m.nearestPOI.name || ""}
+                        </Typography>
+                      </Box>
+                      {distanceLabel && (
+                        <Typography
+                          variant="caption"
+                          sx={{ fontSize: "0.68rem", color: "text.secondary", fontWeight: 600, flexShrink: 0 }}
+                        >
+                          {distanceLabel}
+                        </Typography>
+                      )}
+                    </Box>
+                    {travelText && (
+                      <Box sx={{ display: "flex", alignItems: "center", gap: 0.4, pl: 2.2 }}>
+                        <TravelIconComp sx={{ fontSize: "0.68rem", color: "text.secondary" }} />
+                        <Typography variant="caption" sx={{ fontSize: "0.63rem", color: "text.secondary" }}>
+                          {travelText}
+                        </Typography>
+                      </Box>
+                    )}
+                  </Box>
+                );
+              })}
+            </Box>
+          </Box>
+        )}
+
         <Divider sx={{ my: 0.5 }} />
 
         <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mt: 0.5 }}>
@@ -327,6 +610,27 @@ function MiniPropertyCard(props) {
             />
           )}
         </Box>
+
+        {showPropertyMapButton && (
+          <Chip
+            icon={<MapIcon sx={{ fontSize: "0.85rem !important" }} />}
+            label={t("viewOnMap")}
+            size="small"
+            onClick={handlePropertyViewOnMap}
+            clickable
+            sx={{
+              mt: 1,
+              fontWeight: 600,
+              fontSize: "0.65rem",
+              height: 22,
+              borderRadius: "8px",
+              color: theme.palette.primary.main,
+              borderColor: theme.palette.primary.main,
+              bgcolor: alpha(theme.palette.primary.main, 0.08),
+            }}
+            variant="outlined"
+          />
+        )}
       </Box>
     </Paper>
   );
@@ -363,6 +667,7 @@ function buildSectionLabel(matchedLabel, locationName, language, t) {
 export default function AIChatbot() {
   var theme = useTheme();
   var isDark = theme.palette.mode === "dark";
+  var navigate = useNavigate();
 
   var openState = useState(false);
   var open = openState[0];
@@ -515,6 +820,21 @@ export default function AIChatbot() {
     }
   }
 
+  // "View on map" - navigates to the existing /map page, carrying this
+  // message's already-fetched property objects (with their _amenityMatches/
+  // nearestPOI evidence intact) via React Router's own navigation state.
+  // No re-fetch, no re-parsing of the user's message, no POIs sent
+  // separately - MapPage derives verified POI markers from
+  // recommendedProperties itself (see MapPage.js's recommendationData).
+  function handleViewOnMap(msg) {
+    navigate("/map", {
+      state: {
+        recommendedProperties: msg.properties,
+        recommendationLocation: (msg.metadata && msg.metadata.geocodedLocation) || null,
+      },
+    });
+  }
+
   // ============================================================
   // RENDER
   // ============================================================
@@ -619,8 +939,66 @@ export default function AIChatbot() {
                 </Typography>
               )}
               {msg.properties.slice(0, 5).map(function (property, i) {
-                return <MiniPropertyCard key={property._id || i} property={property} t={t} />;
+                // Reuses the backend's existing geocoded search-location
+                // name (already returned by POST /api/ai/chatbot as
+                // metadata.geocodedLocation.name - see ragService.js) -
+                // never re-parsed or re-geocoded on the frontend. Absent
+                // whenever _distanceKm is also absent (both are gated on
+                // the same successful-geocode condition in runRAG), and the
+                // card gracefully falls back to the plain "X km away" label
+                // when it's missing for any other reason.
+                var searchLocationName =
+                  msg.metadata && msg.metadata.geocodedLocation
+                    ? msg.metadata.geocodedLocation.name
+                    : null;
+                return (
+                  <MiniPropertyCard
+                    key={property._id || i}
+                    property={property}
+                    t={t}
+                    language={language}
+                    locationName={searchLocationName}
+                    recommendationLocation={(msg.metadata && msg.metadata.geocodedLocation) || null}
+                  />
+                );
               })}
+              {msg.properties.some(function (p) {
+                // Mirrors MapPage's recommendationData gate exactly: a
+                // district-level property's geoLocation already holds a
+                // real-looking (but generic, backend-fallback) coordinate,
+                // so getPropertyCoordinates() alone can't tell that apart
+                // from a genuine precise/approximate geocode. Without this
+                // locationAccuracy check the button could appear for a
+                // message whose only property MapPage would then correctly
+                // refuse to plot, leading to an empty recommendation map.
+                var isVerifiableAccuracy =
+                  p.locationAccuracy === "precise" || p.locationAccuracy === "approximate";
+                return isVerifiableAccuracy && !!getPropertyCoordinates(p);
+              }) && (
+                // "View all on map" - sends the full recommendedProperties
+                // array (unlike each card's own property-level button, which
+                // sends only that single property). Same navigation target/
+                // shape and the same MapPage-side filtering/dedup as before -
+                // only this label changed.
+                <Chip
+                  icon={<MapIcon sx={{ fontSize: "0.9rem !important" }} />}
+                  label={t("viewAllOnMap")}
+                  size="small"
+                  onClick={function () { handleViewOnMap(msg); }}
+                  clickable
+                  sx={{
+                    alignSelf: "flex-start",
+                    mt: 0.5,
+                    fontWeight: 600,
+                    fontSize: "0.7rem",
+                    borderRadius: "8px",
+                    color: theme.palette.primary.main,
+                    borderColor: theme.palette.primary.main,
+                    bgcolor: alpha(theme.palette.primary.main, 0.08),
+                  }}
+                  variant="outlined"
+                />
+              )}
             </Box>
           )}
         </Box>

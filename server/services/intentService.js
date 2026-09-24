@@ -27,7 +27,13 @@ const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 // CONFIGURATION
 // ============================================================================
 const CONFIG = {
-  MODEL: "llama-3.3-70b-versatile",
+  // llama-3.3-70b-versatile was decommissioned by Groq (model_not_found).
+  // openai/gpt-oss-120b is a reasoning model - it spends completion tokens
+  // on an internal "reasoning" pass before the actual answer, so
+  // reasoning_effort: "low" below is required, not optional, to leave
+  // enough of MAX_TOKENS for the real JSON output (same fix already used
+  // for openai/gpt-oss-20b in propertyDescriptionService.js).
+  MODEL: "openai/gpt-oss-120b",
   TEMPERATURE: 0.1,        // Low temp = consistent structured output
   MAX_TOKENS: 500,
   RESPONSE_FORMAT: { type: "json_object" }, // Force JSON output
@@ -69,9 +75,48 @@ Return a JSON object with these fields (use null if not mentioned):
       "pool": boolean or null
     }
   },
+  "amenities": [                       // nearby places the user wants the property close to
+    {
+      "category": string,              // MUST be one of the CANONICAL AMENITY CATEGORIES below - never invent one
+      "maxDistance_km": number or null // positive number if user gave a distance, else null (means "near", no specific distance)
+    }
+  ],
   "language": "en" | "bn" | "banglish",
   "confidence": number                 // 0.0 to 1.0, how confident you are
 }
+
+CANONICAL AMENITY CATEGORIES (use ONLY these values for "category" - never invent a new one):
+hospital, clinic, pharmacy, school, college, university, park, marketplace,
+place_of_worship, police, fire_station, bus_station, railway_station,
+ferry_terminal, bank, atm
+
+AMENITY MAPPING RULES:
+- "hospital" → hospital
+- "clinic" → clinic
+- "pharmacy" / "medicine shop" → pharmacy
+- "school" → school
+- "college" → college
+- "university" → university
+- "park" → park
+- "market", "shopping", "bazar", "বাজার" → marketplace
+- "mosque", "masjid", "temple", "mandir", "church", "place of worship" → place_of_worship
+- "police", "police station" → police
+- "fire station" → fire_station
+- "bus stop", "bus station" → bus_station
+- "train station", "railway station" → railway_station
+- "ferry", "ferry terminal", "launch ghat" → ferry_terminal
+- "bank" → bank
+- "atm" → atm
+- "public transport" (no specific mode mentioned) → output BOTH bus_station AND railway_station as
+  two separate amenity entries, since there is no single "public transport" category
+- If the user mentions multiple amenities (e.g. "near schools and parks"), output one entry per
+  amenity, each with its own category and its own maxDistance_km (usually null unless a distance
+  was given for that specific one).
+- If the user gives one distance that clearly applies to all mentioned amenities (e.g. "within 2 km
+  of a university"), apply that maxDistance_km to that amenity's entry.
+- If no amenity is mentioned at all, "amenities" MUST be an empty array [].
+- Never output a category outside the canonical list above - if a requested amenity has no
+  reasonable canonical match, omit that entry entirely rather than inventing a category.
 
 CRITICAL RULES:
 1. Return ONLY valid JSON. No markdown, no explanation, no extra text.
@@ -93,6 +138,9 @@ CRITICAL RULES:
 7. If user just says "hi", "hello", "salam", "আসসালামু আলাইকুম" → intent: "greeting"
 8. If user asks general question like "what is the price in Gulshan?" → intent: "general_question"
 9. If user says "show more", "aro dekhao", "আরো দেখাও" → intent: "show_more"
+10. For amenity/POI requests ("near a hospital", "within 2 km of a university", "near schools and
+    parks"), see AMENITY MAPPING RULES above and populate the "amenities" array accordingly. Only
+    include amenities the user actually asked for - never add one they didn't mention.
 
 EXAMPLES:
 
@@ -107,6 +155,7 @@ Output: {
     "minArea": null, "maxArea": null,
     "features": {}
   },
+  "amenities": [],
   "language": "en",
   "confidence": 0.95
 }
@@ -122,6 +171,7 @@ Output: {
     "minArea": null, "maxArea": null,
     "features": {}
   },
+  "amenities": [],
   "language": "banglish",
   "confidence": 0.9
 }
@@ -137,6 +187,7 @@ Output: {
     "minArea": null, "maxArea": null,
     "features": {}
   },
+  "amenities": [],
   "language": "bn",
   "confidence": 0.95
 }
@@ -146,8 +197,95 @@ Output: {
   "intent": "greeting",
   "location": { "landmark": null, "district": null, "area": null, "radius_km": 5 },
   "filters": { "propertyType": null, "listingType": null, "bedrooms": null, "bathrooms": null, "minPrice": null, "maxPrice": null, "minArea": null, "maxArea": null, "features": {} },
+  "amenities": [],
   "language": "en",
   "confidence": 1.0
+}
+
+Input: "Find apartments in Banani near a hospital"
+Output: {
+  "intent": "search_property",
+  "location": { "landmark": null, "district": null, "area": "Banani", "radius_km": 5 },
+  "filters": {
+    "propertyType": "apartment", "listingType": null,
+    "bedrooms": null, "bathrooms": null,
+    "minPrice": null, "maxPrice": null,
+    "minArea": null, "maxArea": null,
+    "features": {}
+  },
+  "amenities": [ { "category": "hospital", "maxDistance_km": null } ],
+  "language": "en",
+  "confidence": 0.9
+}
+
+Input: "Show properties within 2 km of a university"
+Output: {
+  "intent": "search_property",
+  "location": { "landmark": null, "district": null, "area": null, "radius_km": 5 },
+  "filters": {
+    "propertyType": null, "listingType": null,
+    "bedrooms": null, "bathrooms": null,
+    "minPrice": null, "maxPrice": null,
+    "minArea": null, "maxArea": null,
+    "features": {}
+  },
+  "amenities": [ { "category": "university", "maxDistance_km": 2 } ],
+  "language": "en",
+  "confidence": 0.9
+}
+
+Input: "Find a family apartment near schools and parks"
+Output: {
+  "intent": "search_property",
+  "location": { "landmark": null, "district": null, "area": null, "radius_km": 5 },
+  "filters": {
+    "propertyType": "apartment", "listingType": null,
+    "bedrooms": null, "bathrooms": null,
+    "minPrice": null, "maxPrice": null,
+    "minArea": null, "maxArea": null,
+    "features": {}
+  },
+  "amenities": [
+    { "category": "school", "maxDistance_km": null },
+    { "category": "park", "maxDistance_km": null }
+  ],
+  "language": "en",
+  "confidence": 0.85
+}
+
+Input: "Find properties near a mosque"
+Output: {
+  "intent": "search_property",
+  "location": { "landmark": null, "district": null, "area": null, "radius_km": 5 },
+  "filters": {
+    "propertyType": null, "listingType": null,
+    "bedrooms": null, "bathrooms": null,
+    "minPrice": null, "maxPrice": null,
+    "minArea": null, "maxArea": null,
+    "features": {}
+  },
+  "amenities": [ { "category": "place_of_worship", "maxDistance_km": null } ],
+  "language": "en",
+  "confidence": 0.9
+}
+
+Input: "Find apartments near public transport"
+Output: {
+  "intent": "search_property",
+  "location": { "landmark": null, "district": null, "area": null, "radius_km": 5 },
+  "filters": {
+    "propertyType": "apartment", "listingType": null,
+    "bedrooms": null, "bathrooms": null,
+    "minPrice": null, "maxPrice": null,
+    "minArea": null, "maxArea": null,
+    "features": {}
+  },
+  "amenities": [
+    { "category": "bus_station", "maxDistance_km": null },
+    { "category": "railway_station", "maxDistance_km": null }
+  ],
+  "language": "en",
+  "confidence": 0.85
 }`;
 
 // ============================================================================
@@ -187,6 +325,7 @@ async function extractIntent(userMessage, conversationHistory = []) {
       temperature: CONFIG.TEMPERATURE,
       max_tokens: CONFIG.MAX_TOKENS,
       response_format: CONFIG.RESPONSE_FORMAT,
+      reasoning_effort: "low",
     });
 
     const rawResponse = completion.choices[0]?.message?.content;
@@ -256,6 +395,7 @@ function validateIntent(raw) {
       maxArea: clampNumber(raw.filters?.maxArea, 0, Infinity, null),
       features: raw.filters?.features || {},
     },
+    amenities: validateAmenities(raw.amenities),
     language: validLanguages.includes(raw.language) ? raw.language : "en",
     confidence: clampNumber(raw.confidence, 0, 1, 0.5),
   };
@@ -270,6 +410,64 @@ function clampNumber(value, min, max, defaultValue) {
   if (isNaN(num)) return defaultValue;
   if (num < min || num > max) return defaultValue;
   return num;
+}
+
+// ============================================================================
+// HELPER: Validate/normalize the amenities array
+// ============================================================================
+// Canonical categories must exactly match server/models/PointOfInterest.js's
+// CATEGORIES export - kept as a local copy (rather than requiring the
+// Mongoose model here) so this service's dependency footprint and "no
+// MongoDB/POI querying" scope stay unchanged. Update both lists together if
+// the POI category set ever changes.
+const VALID_AMENITY_CATEGORIES = [
+  "hospital",
+  "clinic",
+  "pharmacy",
+  "school",
+  "college",
+  "university",
+  "park",
+  "marketplace",
+  "place_of_worship",
+  "police",
+  "fire_station",
+  "bus_station",
+  "railway_station",
+  "ferry_terminal",
+  "bank",
+  "atm",
+];
+
+// A maxDistance_km beyond this is treated the same as "no distance given"
+// (null) rather than trusted as-is - mirrors location.radius_km's existing
+// 50 km upper clamp above, so an amenity distance can't be an unbounded or
+// nonsensical value either.
+const MAX_AMENITY_DISTANCE_KM = 50;
+
+function normalizeAmenityDistance(value) {
+  if (value === null || value === undefined) return null;
+  const num = Number(value);
+  if (!Number.isFinite(num) || num <= 0) return null;
+  return Math.min(num, MAX_AMENITY_DISTANCE_KM);
+}
+
+function validateAmenities(raw) {
+  if (!Array.isArray(raw)) return [];
+
+  const result = [];
+  for (const entry of raw) {
+    const category = entry?.category;
+    // Unsupported/invented categories are dropped entirely, not nulled -
+    // an amenity entry with no valid category carries no usable signal.
+    if (!VALID_AMENITY_CATEGORIES.includes(category)) continue;
+
+    result.push({
+      category,
+      maxDistance_km: normalizeAmenityDistance(entry?.maxDistance_km),
+    });
+  }
+  return result;
 }
 
 // ============================================================================
@@ -290,6 +488,7 @@ function getEmptyIntent() {
       maxArea: null,
       features: {},
     },
+    amenities: [],
     language: "en",
     confidence: 0,
   };

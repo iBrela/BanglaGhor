@@ -34,6 +34,7 @@ import HomeIcon from "@mui/icons-material/Home";
 import InfoIcon from "@mui/icons-material/Info";
 import ContactsIcon from "@mui/icons-material/Contacts";
 import HomeWorkIcon from "@mui/icons-material/HomeWork";
+import MapIcon from "@mui/icons-material/Map";
 import { useTranslation } from "react-i18next";
 import UploadIdModal from "../../features/profile/components/UploadIdModal";
 import Logo from '../../pictures/logo.png';
@@ -87,6 +88,10 @@ const Navbar = () => {
       path: "/properties/rent",
       icon: <HomeWorkIcon />,
     },
+    // Existing /map route (see App.js) - no new route created here, this
+    // just surfaces it as a normal top-level nav item now that the
+    // homepage's own embedded map preview has been removed.
+    { id: "map", label: t("nav_map"), path: "/map", icon: <MapIcon /> },
     { id: "about", label: t("nav_about"), path: "/about", icon: <InfoIcon /> },
     {
       id: "contact",
@@ -100,6 +105,7 @@ const Navbar = () => {
     const currentPath = location.pathname;
     if (currentPath === "/") setActiveLink("home");
     else if (currentPath.startsWith("/properties")) setActiveLink("properties");
+    else if (currentPath.startsWith("/map")) setActiveLink("map");
     else if (currentPath.startsWith("/about")) setActiveLink("about");
     else if (currentPath.startsWith("/contact")) setActiveLink("contact");
     else if (currentPath.startsWith("/list-property")) setActiveLink("");

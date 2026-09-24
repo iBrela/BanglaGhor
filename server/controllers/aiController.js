@@ -77,16 +77,32 @@ const chatbot = async (req, res) => {
     console.log(`[Chatbot] Completed in ${duration}ms`);
     console.log("[Chatbot] ════════════════════════════════════════\n");
 
+    // Property documents come back from ragService.js as .lean() reads,
+    // which (confirmed live) include some fields that exist on the
+    // underlying MongoDB documents but aren't part of the Mongoose schema -
+    // notably a large `embedding` vector (and `semanticSearchText`), never
+    // read by any backend code (grep-confirmed) and not needed by the
+    // chatbot UI. Stripped here, at the HTTP boundary only: the DB query
+    // itself is untouched, recommendationService's own use of these
+    // objects already happened earlier in ragService.runRAG, and every
+    // other property field (including the amenity-evidence fields below)
+    // passes through unchanged.
+    const responseProperties = (ragResult.properties || []).map((p) => {
+      const { embedding, semanticSearchText, ...rest } = p;
+      return rest;
+    });
+
     return res.json({
       success: true,
       reply: ragResult.reply,
-      properties: ragResult.properties || [],
+      properties: responseProperties,
       metadata: {
         intent: ragResult.metadata.intent,
         searchTier: ragResult.metadata.searchTier,
         geocodedLocation: ragResult.metadata.geocodedLocation,
         propertyCount: ragResult.metadata.propertyCount,
         language: ragResult.metadata.language,
+        amenitiesRequested: ragResult.metadata.amenitiesRequested,
         responseTimeMs: duration,
       },
     });
