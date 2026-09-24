@@ -2,14 +2,29 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <link rel="icon" href="%PUBLIC_URL%/favicon.ico" />
+    <!--
+      Theme-aware favicon, mirroring Navbar.js's own dark-mode logic exactly
+      (filter: brightness(0) invert(1) applied only when theme.palette.mode
+      === 'dark' - see src/components/layout/Navbar.js). Same source asset
+      (pictures/logo.png), just pre-rendered white for dark browser tabs so
+      it stays visible there too - a plain white favicon disappears on light
+      tabs, so a single static icon can't satisfy both. Browsers without
+      prefers-color-scheme favicon support (e.g. older Safari) fall back to
+      the plain default below.
+    -->
+    <link rel="icon" href="%PUBLIC_URL%/pictures/logo.png" />
+    <link
+      rel="icon"
+      href="%PUBLIC_URL%/pictures/logo-white.png"
+      media="(prefers-color-scheme: dark)"
+    />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#000000" />
     <meta
       name="description"
       content="Web site created using create-react-app"
     />
-    <link rel="apple-touch-icon" href="%PUBLIC_URL%/logo192.png" />
+    <link rel="apple-touch-icon" href="%PUBLIC_URL%/pictures/logo.png" />
     <!--
       manifest.json provides metadata used when your web app is installed on a
       user's mobile device or desktop. See https://developers.google.com/web/fundamentals/web-app-manifest/
@@ -24,7 +39,7 @@
       work correctly both with client-side routing and a non-root public URL.
       Learn how to configure a non-root public URL by running `npm run build`.
     -->
-    <title>React App</title>
+    <title>BanglaGhor</title>
   </head>
   <body>
     <noscript>You need to enable JavaScript to run this app.</noscript>
