@@ -33,9 +33,10 @@ const poiService = require("./poiService");
 const routingService = require("./routingService");
 
 // Matches accessibilityService.js's own DEFAULT_MODE, for consistency with
-// the rest of the app's travel-time features. Not exposed as a per-request
-// option here (intentService's amenity schema deliberately isn't touched by
-// this task), same conservative default used elsewhere.
+// the rest of the app's travel-time features. Used whenever the user didn't
+// explicitly state a travel mode (see intentService.js's `travelMode` field,
+// threaded through by ragService.js's runRAG) - driving remains the sensible
+// default, explicit walking/cycling requests now override it end to end.
 const DEFAULT_TRAVEL_MODE = "driving";
 
 // ============================================================================
@@ -107,6 +108,13 @@ async function findNearestAmenityMatch(point, amenity) {
   return {
     category: amenity.category,
     requestedMaxDistanceKm: amenity.maxDistance_km ?? null,
+    // Present only when the user gave an explicit travel TIME instead of
+    // (or alongside) a distance - see intentService.js's maxDuration_min.
+    // Never itself changes `matched` - the geospatial radius check above is
+    // always what decides that; a duration request only adds a SEPARATE,
+    // honestly-labelled travelTimeVerified fact once enrichWithTravelTime
+    // below has a real Valhalla number to compare against.
+    requestedMaxDurationMin: amenity.maxDuration_min ?? null,
     matched: !!nearest,
     nearestPOI: nearest
       ? {
@@ -123,6 +131,11 @@ async function findNearestAmenityMatch(point, amenity) {
     // duration was obtained for this exact matched POI. Never set from
     // straight-line distance, never estimated.
     travel: null,
+    // null = "no duration was requested, or Valhalla never returned a real
+    // number to check" (never claim verified/unverified without real data);
+    // true/false only ever set from a genuine travel.durationMinutes vs
+    // requestedMaxDurationMin comparison in enrichWithTravelTime below.
+    travelTimeVerified: null,
   };
 }
 
@@ -259,8 +272,19 @@ async function enrichWithTravelTime(evidenceList, mode = DEFAULT_TRAVEL_MODE) {
                   : null,
               mode,
             };
+            // Only ever set from a REAL Valhalla duration compared against
+            // the user's own requested duration - never estimated, never
+            // derived from the straight-line distance (see intentService.js's
+            // maxDuration_min / "do not fabricate walking duration from
+            // distance").
+            if (m.requestedMaxDurationMin != null) {
+              m.travelTimeVerified = m.travel.durationMinutes <= m.requestedMaxDurationMin;
+            }
           }
-          // else: leave m.travel as the null default set in findNearestAmenityMatch
+          // else: leave m.travel as the null default set in findNearestAmenityMatch -
+          // and travelTimeVerified stays null too if a duration was requested
+          // but Valhalla couldn't solve this cell (honestly "not verified",
+          // never assumed either way).
         });
       } catch (error) {
         // Non-fatal by design - see the function-level comment above.
@@ -340,8 +364,125 @@ function rankEvidence(evidenceList) {
   });
 }
 
+// ============================================================================
+// SOFT FEATURE EVIDENCE — deterministic, never a Mongo filter
+// ============================================================================
+// intentService.js's HARD VS SOFT split keeps these OUT of buildBaseQuery
+// (ragService.js) entirely - a soft "would like a balcony" preference must
+// never silently exclude an otherwise-great property. Instead, each already-
+// fetched candidate's OWN real fields (server/models/property.js's
+// features/bangladeshDetails - no new query, no invented field) are checked
+// here for explanation/ranking display only. furnished/balcony/rooftopAccess/
+// security are stored as enums/arrays in the real schema, not booleans - the
+// translation from the LLM's boolean "user wants this" happens only here,
+// at read time, never by rewriting the DB schema.
+const SOFT_FEATURE_CHECKS = {
+  parking: (p) => p?.features?.parking === true,
+  airConditioning: (p) => p?.features?.airConditioning === true,
+  garden: (p) => p?.features?.garden === true,
+  pool: (p) => p?.features?.pool === true,
+  furnished: (p) => p?.features?.furnished === "semi" || p?.features?.furnished === "full",
+  balcony: (p) => p?.bangladeshDetails?.balcony === "yes",
+  rooftopAccess: (p) => p?.bangladeshDetails?.rooftopAccess === "yes",
+  security: (p) => Array.isArray(p?.bangladeshDetails?.securityFeatures) && p.bangladeshDetails.securityFeatures.length > 0,
+};
+
+/**
+ * @param {Object} property
+ * @param {Object} requestedFeatures - intent.filters.features (only keys the
+ *   user actually asked for are present and true)
+ * @returns {{matched: string[], unmatched: string[]}}
+ */
+function analyzeSoftFeatures(property, requestedFeatures) {
+  const matched = [];
+  const unmatched = [];
+  if (!requestedFeatures || typeof requestedFeatures !== "object") {
+    return { matched, unmatched };
+  }
+  for (const key of Object.keys(requestedFeatures)) {
+    if (requestedFeatures[key] !== true) continue;
+    const check = SOFT_FEATURE_CHECKS[key];
+    if (!check) continue; // unknown key - never invented, just skipped
+    if (check(property)) matched.push(key);
+    else unmatched.push(key);
+  }
+  return { matched, unmatched };
+}
+
+// ============================================================================
+// EXPLAINABLE RECOMMENDATIONS — deterministic matchReasons/unmatchedPreferences
+// ============================================================================
+// Built ENTIRELY from already-verified backend facts (hard filters actually
+// satisfied by this exact property, real amenity evidence, real soft-feature
+// checks) - the LLM in ragService.js's generateReply may rephrase these into
+// natural language, but never invents a reason that isn't in this list. Kept
+// to a small, concrete set (2-4 typical) rather than every possible fact, so
+// property cards stay readable - see the frontend card design note.
+const MAX_MATCH_REASONS = 4;
+
+function buildMatchReasons(property, intent, amenityMatches, softFeatures) {
+  const reasons = [];
+  const unmatched = [];
+  const filters = (intent && intent.filters) || {};
+
+  // Amenity evidence first - it's usually the primary reason the user is
+  // looking at this property at all.
+  (amenityMatches || []).forEach((m) => {
+    if (m.matched && m.nearestPOI) {
+      const distanceLabel =
+        m.nearestPOI.distanceMeters >= 1000
+          ? `${(m.nearestPOI.distanceMeters / 1000).toFixed(1)} km`
+          : `${Math.round(m.nearestPOI.distanceMeters)} m`;
+      reasons.push(`${formatCategoryLabel(m.category)} ${distanceLabel} away`);
+    } else {
+      const withinNote = m.requestedMaxDistanceKm ? ` within ${m.requestedMaxDistanceKm} km` : "";
+      unmatched.push(`${formatCategoryLabel(m.category)} not verified${withinNote}`);
+    }
+  });
+
+  // Hard filters this SPECIFIC property actually satisfies (not just "was
+  // asked for" - genuinely true of this property's own real fields).
+  if (filters.bedrooms != null && property.bedrooms >= filters.bedrooms) {
+    reasons.push(`${property.bedrooms} bedrooms`);
+  }
+  if (filters.maxPrice != null && property.price != null && property.price <= filters.maxPrice) {
+    reasons.push("Within budget");
+  }
+  if ((filters.minArea != null || filters.maxArea != null) && property.area != null) {
+    reasons.push(`${property.area} sqft`);
+  }
+
+  // Soft feature evidence.
+  (softFeatures?.matched || []).forEach((f) => reasons.push(`Has ${formatFeatureLabel(f)}`));
+  (softFeatures?.unmatched || []).forEach((f) => unmatched.push(`${formatFeatureLabel(f)} not confirmed`));
+
+  return {
+    matchReasons: reasons.slice(0, MAX_MATCH_REASONS),
+    unmatchedPreferences: unmatched,
+  };
+}
+
+function formatCategoryLabel(category) {
+  return String(category || "").replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+function formatFeatureLabel(key) {
+  const labels = {
+    parking: "parking",
+    airConditioning: "air conditioning",
+    garden: "garden",
+    pool: "pool",
+    furnished: "furnished",
+    balcony: "balcony",
+    rooftopAccess: "rooftop access",
+    security: "security",
+  };
+  return labels[key] || key;
+}
+
 module.exports = {
   analyzeCandidates,
   enrichWithTravelTime,
+  analyzeSoftFeatures,
+  buildMatchReasons,
   rankEvidence,
 };

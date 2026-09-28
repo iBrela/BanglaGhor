@@ -20,6 +20,7 @@
 // ============================================================================
 
 const Groq = require("groq-sdk");
+const priceParser = require("./priceParser");
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
@@ -67,23 +68,46 @@ Return a JSON object with these fields (use null if not mentioned):
     "maxPrice": number or null,        // in BDT (convert "50 lakh" to 5000000, "1 crore" to 10000000)
     "minArea": number or null,         // in sqft
     "maxArea": number or null,
-    "features": {                      // boolean flags, only include if user mentioned
+    "features": {                      // SOFT preferences, only include if user mentioned - see
+                                        // HARD VS SOFT below. Never used to exclude a property from
+                                        // results, only to explain/rank matches.
       "parking": boolean or null,
       "furnished": boolean or null,
       "airConditioning": boolean or null,
       "garden": boolean or null,
-      "pool": boolean or null
+      "pool": boolean or null,
+      "balcony": boolean or null,
+      "rooftopAccess": boolean or null,
+      "security": boolean or null      // gated community, guards, or CCTV mentioned
     }
   },
   "amenities": [                       // nearby places the user wants the property close to
     {
       "category": string,              // MUST be one of the CANONICAL AMENITY CATEGORIES below - never invent one
-      "maxDistance_km": number or null // positive number if user gave a distance, else null (means "near", no specific distance)
+      "maxDistance_km": number or null, // positive number if user gave an explicit straight-line distance, else null
+      "maxDuration_min": number or null // positive number ONLY if the user explicitly gave a travel TIME
+                                        // (e.g. "10 minute walk", "5 min drive") instead of a distance - else null.
+                                        // Never both a distance AND a duration for the same amenity unless the
+                                        // user genuinely stated both.
     }
   ],
+  "travelMode": "driving" | "walking" | "cycling" | null, // ONLY when the user explicitly said how they'd
+                                        // travel (walk/drive/cycle) - null otherwise. Must be one of these
+                                        // three values - the routing engine does not support any other mode.
   "language": "en" | "bn" | "banglish",
   "confidence": number                 // 0.0 to 1.0, how confident you are
 }
+
+HARD VS SOFT (this distinction is structural, not just wording - the backend applies "filters" as
+real MongoDB query constraints that a returned property must satisfy, and treats "features"/soft
+amenity preferences as evidence used only for explanation and ranking, never to exclude a property):
+- HARD (put in "filters"): explicit property type, explicit listing type (rent/buy), explicit minimum
+  bedrooms/bathrooms, explicit min/max price, explicit min/max area, explicit district/area/landmark
+  the user clearly requires.
+- SOFT (put in "features" or "amenities"): parking, furnished, air conditioning, garden, pool, balcony,
+  rooftop access, security/gated/guards/CCTV, and any "near a school/hospital/etc." request. These are
+  preferences the backend will try to satisfy and report on, but will never use to silently drop an
+  otherwise-good property from the results.
 
 CANONICAL AMENITY CATEGORIES (use ONLY these values for "category" - never invent a new one):
 hospital, clinic, pharmacy, school, college, university, park, marketplace,
@@ -114,9 +138,25 @@ AMENITY MAPPING RULES:
   was given for that specific one).
 - If the user gives one distance that clearly applies to all mentioned amenities (e.g. "within 2 km
   of a university"), apply that maxDistance_km to that amenity's entry.
+- If the user gives a TRAVEL TIME instead of a distance (e.g. "10 minute walk from school", "5 min
+  drive from hospital"), put that number in maxDuration_min for that amenity (not maxDistance_km),
+  and set the top-level "travelMode" to the mode they stated ("walking" for "walk", "driving" for
+  "drive"/"car", "cycling" for "cycle"/"bike"). Never guess a travel mode the user didn't state.
 - If no amenity is mentioned at all, "amenities" MUST be an empty array [].
 - Never output a category outside the canonical list above - if a requested amenity has no
   reasonable canonical match, omit that entry entirely rather than inventing a category.
+
+FEATURE SYNONYM MAPPING RULES (put these under filters.features - see HARD VS SOFT above):
+- "parking", "car parking", "garage" → features.parking = true
+- "AC", "a/c", "air conditioning", "air conditioned" → features.airConditioning = true
+- "furnished", "fully furnished", "semi furnished" → features.furnished = true
+- "garden", "yard" → features.garden = true
+- "pool", "swimming pool" → features.pool = true
+- "balcony", "veranda" → features.balcony = true
+- "rooftop", "roof access", "terrace" → features.rooftopAccess = true
+- "security", "gated", "gated community", "guard", "guards", "CCTV" → features.security = true
+- Only set a feature to true if the user actually asked for it - never set one to false, and never
+  include a feature the user didn't mention at all (leave it out of the object entirely).
 
 CRITICAL RULES:
 1. Return ONLY valid JSON. No markdown, no explanation, no extra text.
@@ -296,9 +336,15 @@ Output: {
  *
  * @param {string} userMessage - What the user typed
  * @param {Array} conversationHistory - Optional: last few messages for context
+ * @param {Object|null} previousIntent - Optional: the FULL validated intent
+ *   object from the immediately preceding turn (aiController.js round-trips
+ *   this via metadata.structuredIntent - the backend itself is stateless, so
+ *   this is the only reliable way to merge turns deterministically instead
+ *   of hoping the LLM re-derives everything correctly from raw history text
+ *   every time). See mergeIntent below for the actual merge rules.
  * @returns {Promise<Object>} Structured intent object
  */
-async function extractIntent(userMessage, conversationHistory = []) {
+async function extractIntent(userMessage, conversationHistory = [], previousIntent = null) {
   if (!userMessage || typeof userMessage !== "string") {
     return getEmptyIntent();
   }
@@ -338,7 +384,20 @@ async function extractIntent(userMessage, conversationHistory = []) {
     const intent = JSON.parse(rawResponse);
 
     // Validate and normalize the response
-    const validated = validateIntent(intent);
+    let validated = validateIntent(intent);
+
+    // Deterministic multi-turn merge - see mergeIntent's own doc comment for
+    // the exact per-field rules (a new explicit value always wins; unset
+    // fields inherit from the previous turn only when this turn is a real
+    // continuation of the same search).
+    if (previousIntent) {
+      validated = mergeIntent(previousIntent, validated);
+    }
+
+    // Development-only cross-check (see priceParser.js) - never overrides
+    // the LLM's own price extraction, just surfaces a disagreement in logs.
+    const priceWarning = priceParser.crossCheckPrice(userMessage, validated.filters);
+    if (priceWarning) console.warn(`[IntentService] ${priceWarning}`);
 
     console.log(`[IntentService] Extracted intent:`, JSON.stringify(validated, null, 2));
     return validated;
@@ -346,6 +405,61 @@ async function extractIntent(userMessage, conversationHistory = []) {
     console.error("[IntentService] Error extracting intent:", error.message);
     return getEmptyIntent();
   }
+}
+
+// ============================================================================
+// HELPER: Deterministic multi-turn intent merge
+// ============================================================================
+// Only runs for a genuine continuation (see the intent-classification guard
+// below) - a "greeting"/"general_question"/"unknown" turn never inherits
+// stale filters from an earlier, unrelated search.
+//
+// Per-field rule: a NEW explicit value always overrides the previous turn's
+// value (e.g. "Actually, Gulshan" replaces "Banani"); a field the new
+// extraction left unset inherits the previous turn's value, so
+// "I want an apartment in Banani" -> "Make it 3 bedrooms" -> "Under 60
+// thousand per month" ends up with location=Banani, propertyType=apartment,
+// bedrooms=3, maxPrice=60000 after the third turn, without any single
+// message having stated all of it.
+const MERGEABLE_INTENTS = ["search_property", "refine_search", "show_more"];
+
+function mergeIntent(previous, current) {
+  if (!MERGEABLE_INTENTS.includes(current.intent)) return current;
+
+  // location: a new mention of ANY location field replaces the whole
+  // location object (never mixes a new area with an old, now-stale
+  // district/landmark) - only inherits wholesale when the new turn
+  // mentioned no location at all.
+  const currentMentionedLocation =
+    current.location.landmark || current.location.district || current.location.area;
+  const location = currentMentionedLocation ? current.location : previous.location;
+
+  // filters: field-by-field inheritance - a new explicit (non-null) value
+  // always wins, otherwise fall back to the previous turn's value.
+  const filters = {};
+  for (const key of ["propertyType", "listingType", "bedrooms", "bathrooms", "minPrice", "maxPrice", "minArea", "maxArea"]) {
+    filters[key] = current.filters[key] !== null && current.filters[key] !== undefined
+      ? current.filters[key]
+      : (previous.filters?.[key] ?? null);
+  }
+  // features: additive - a soft preference stated in an earlier turn still
+  // applies unless the schema simply has no way to contradict a boolean
+  // (there's no "I no longer want parking" negative case in this shape).
+  filters.features = Object.assign({}, previous.filters?.features, current.filters.features);
+
+  // amenities: additive by category - "near a school" then "and a hospital
+  // too" should end up with both; a repeated category's newest distance/
+  // duration wins (the user re-stated it, so their latest wording governs).
+  const amenityByCategory = new Map();
+  (previous.amenities || []).forEach((a) => amenityByCategory.set(a.category, a));
+  (current.amenities || []).forEach((a) => amenityByCategory.set(a.category, a));
+
+  return Object.assign({}, current, {
+    location,
+    filters,
+    amenities: Array.from(amenityByCategory.values()),
+    travelMode: current.travelMode || previous.travelMode || null,
+  });
 }
 
 // ============================================================================
@@ -371,6 +485,7 @@ function validateIntent(raw) {
 
   const validListingTypes = ["rent", "buy"];
   const validLanguages = ["en", "bn", "banglish"];
+  const validTravelModes = ["driving", "walking", "cycling"]; // matches routingService.js's MODE_TO_COSTING - the only modes the installed Valhalla actually supports
 
   return {
     intent: validIntents.includes(raw.intent) ? raw.intent : "unknown",
@@ -393,12 +508,54 @@ function validateIntent(raw) {
       maxPrice: clampNumber(raw.filters?.maxPrice, 0, Infinity, null),
       minArea: clampNumber(raw.filters?.minArea, 0, Infinity, null),
       maxArea: clampNumber(raw.filters?.maxArea, 0, Infinity, null),
-      features: raw.filters?.features || {},
+      // SOFT preferences only - never applied as a MongoDB query filter (see
+      // recommendationService.js's analyzeSoftFeatures) - only booleans the
+      // user actually asked for are kept, matching the real Property schema
+      // fields (server/models/property.js's features/bangladeshDetails).
+      features: validateFeatures(raw.filters?.features),
     },
     amenities: validateAmenities(raw.amenities),
+    // Only meaningful alongside an amenity's maxDuration_min (see
+    // validateAmenities) - a travel mode with no duration-bound amenity is
+    // harmless and simply unused downstream.
+    travelMode: validTravelModes.includes(raw.travelMode) ? raw.travelMode : null,
     language: validLanguages.includes(raw.language) ? raw.language : "en",
     confidence: clampNumber(raw.confidence, 0, 1, 0.5),
   };
+}
+
+// ============================================================================
+// HELPER: Validate/normalize the SOFT features object
+// ============================================================================
+// Matches the real, existing schema fields only (server/models/property.js):
+// features.{parking,garden,airConditioning,pool} are booleans there,
+// features.furnished is a "no"/"semi"/"full" enum (translated from the LLM's
+// boolean by recommendationService.js, not here - this function only ever
+// validates the EXTRACTED intent shape, never touches DB query shape).
+// balcony/rooftopAccess/security live under bangladeshDetails in the real
+// schema - same translation split applies. No field is invented: every key
+// here maps to a real, already-existing Property field.
+const VALID_FEATURE_KEYS = [
+  "parking",
+  "furnished",
+  "airConditioning",
+  "garden",
+  "pool",
+  "balcony",
+  "rooftopAccess",
+  "security",
+];
+
+function validateFeatures(raw) {
+  if (!raw || typeof raw !== "object") return {};
+  const result = {};
+  for (const key of VALID_FEATURE_KEYS) {
+    // Only ever true - "the user wants this" - never false/null; a feature
+    // the user didn't mention simply isn't a key in the object, matching the
+    // SYSTEM_PROMPT's own "only include if user mentioned" instruction.
+    if (raw[key] === true) result[key] = true;
+  }
+  return result;
 }
 
 // ============================================================================
@@ -444,12 +601,22 @@ const VALID_AMENITY_CATEGORIES = [
 // 50 km upper clamp above, so an amenity distance can't be an unbounded or
 // nonsensical value either.
 const MAX_AMENITY_DISTANCE_KM = 50;
+// Same idea for an explicit travel-time request (e.g. "10 minute walk") -
+// nothing realistic for a property search exceeds two hours.
+const MAX_AMENITY_DURATION_MIN = 120;
 
 function normalizeAmenityDistance(value) {
   if (value === null || value === undefined) return null;
   const num = Number(value);
   if (!Number.isFinite(num) || num <= 0) return null;
   return Math.min(num, MAX_AMENITY_DISTANCE_KM);
+}
+
+function normalizeAmenityDuration(value) {
+  if (value === null || value === undefined) return null;
+  const num = Number(value);
+  if (!Number.isFinite(num) || num <= 0) return null;
+  return Math.min(num, MAX_AMENITY_DURATION_MIN);
 }
 
 function validateAmenities(raw) {
@@ -465,6 +632,7 @@ function validateAmenities(raw) {
     result.push({
       category,
       maxDistance_km: normalizeAmenityDistance(entry?.maxDistance_km),
+      maxDuration_min: normalizeAmenityDuration(entry?.maxDuration_min),
     });
   }
   return result;
@@ -489,6 +657,7 @@ function getEmptyIntent() {
       features: {},
     },
     amenities: [],
+    travelMode: null,
     language: "en",
     confidence: 0,
   };
@@ -499,4 +668,9 @@ function getEmptyIntent() {
 // ============================================================================
 module.exports = {
   extractIntent,
+  // Exported for the evaluation harness (server/tests/) - pure, deterministic
+  // functions that are worth testing directly without a live Groq call.
+  validateIntent,
+  mergeIntent,
+  getEmptyIntent,
 };

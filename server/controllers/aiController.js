@@ -39,7 +39,7 @@ const chatbot = async (req, res) => {
 
   try {
     // ─── STEP 1: Extract & validate inputs ──────────────────────────────
-    const { message, conversationHistory, language: requestedLanguage } = req.body;
+    const { message, conversationHistory, language: requestedLanguage, previousIntent } = req.body;
 
     if (!message || typeof message !== "string" || !message.trim()) {
       return res.status(400).json({
@@ -52,6 +52,13 @@ const chatbot = async (req, res) => {
 
     const userMessage = message.trim();
     const history = Array.isArray(conversationHistory) ? conversationHistory : [];
+    // Round-tripped from the frontend's own last assistant message
+    // (metadata.structuredIntent below) - see intentService.js's mergeIntent
+    // for why a genuine object here (not just re-parsing history text) is
+    // what makes multi-turn refinement deterministic. Never trusted blindly
+    // as a query source itself - it only ever flows into extractIntent's own
+    // validation/merge, the same as any other untrusted request body field.
+    const safePreviousIntent = previousIntent && typeof previousIntent === "object" ? previousIntent : null;
 
     console.log("\n[Chatbot] ════════════════════════════════════════");
     console.log(`[Chatbot] Incoming message: "${userMessage}"`);
@@ -59,7 +66,7 @@ const chatbot = async (req, res) => {
     console.log(`[Chatbot] Requested language: ${requestedLanguage || "auto"}`);
 
     // ─── STEP 2: Extract intent using AI ────────────────────────────────
-    const intent = await intentService.extractIntent(userMessage, history);
+    const intent = await intentService.extractIntent(userMessage, history, safePreviousIntent);
 
     // Override language if frontend explicitly requested one
     if (requestedLanguage && ["en", "bn", "banglish"].includes(requestedLanguage)) {
@@ -98,11 +105,40 @@ const chatbot = async (req, res) => {
       properties: responseProperties,
       metadata: {
         intent: ragResult.metadata.intent,
-        searchTier: ragResult.metadata.searchTier,
+        // locationName/matchedLabel/matchedRadius/filtersUsed were
+        // previously dropped here (this object read a non-existent
+        // `searchTier` field instead of ragService.js's actual
+        // `matchedLabel`/`locationName`) - the frontend's own
+        // buildSectionLabel(msg.metadata.matchedLabel, msg.metadata.
+        // locationName, ...) in ai_chatbot.js silently always received
+        // undefined for both, so the "📍 Very close to X" / "Close to X
+        // (within 25km)" section heading above property cards never
+        // rendered. Fixed by forwarding ragService's real metadata field
+        // names instead of the stale/nonexistent one.
+        locationName: ragResult.metadata.locationName,
+        matchedLabel: ragResult.metadata.matchedLabel,
+        matchedRadius: ragResult.metadata.matchedRadius,
+        filtersUsed: ragResult.metadata.filtersUsed,
+        // Non-empty only when no EXACT match existed and this is a clearly-
+        // labelled alternative (see ragService.js's searchProgressively) -
+        // the frontend uses this to show an "Alternative" badge instead of
+        // presenting a relaxed result as if it matched exactly.
+        relaxedConstraints: ragResult.metadata.relaxedConstraints || [],
+        needsClarification: !!ragResult.metadata.needsClarification,
+        clarificationQuestion: ragResult.metadata.clarificationQuestion || null,
         geocodedLocation: ragResult.metadata.geocodedLocation,
         propertyCount: ragResult.metadata.propertyCount,
         language: ragResult.metadata.language,
         amenitiesRequested: ragResult.metadata.amenitiesRequested,
+        // Round-tripped to the frontend so it can send it back as
+        // `previousIntent` on the NEXT message - see mergeIntent's doc
+        // comment. Purely structured data (no free text beyond what the
+        // user themselves already typed), safe to store in the frontend's
+        // existing per-message chat history alongside `properties`.
+        structuredIntent: ragResult.metadata.structuredIntent || null,
+        // Dev-facing latency breakdown (section 17) - no tokens/secrets/PII,
+        // just stage durations already computed in ragService.js.
+        timings: ragResult.metadata.timings || null,
         responseTimeMs: duration,
       },
     });

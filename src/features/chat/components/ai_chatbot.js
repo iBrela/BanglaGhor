@@ -103,6 +103,9 @@ const TRANSLATIONS = {
     travelModeDriving: "drive",
     travelModeWalking: "walk",
     travelModeCycling: "cycle",
+    alternativeResult: "Alternative — not an exact match",
+    whyThisMatches: "Why this matches",
+    notConfirmed: "Not confirmed",
   },
   bn: {
     title: "BanglaGhor AI",
@@ -135,6 +138,9 @@ const TRANSLATIONS = {
     travelModeDriving: "গাড়িতে",
     travelModeWalking: "হেঁটে",
     travelModeCycling: "সাইকেলে",
+    alternativeResult: "বিকল্প — সম্পূর্ণ মিল নয়",
+    whyThisMatches: "কেন এটি মিলেছে",
+    notConfirmed: "নিশ্চিত করা যায়নি",
   },
 };
 
@@ -301,6 +307,26 @@ function MiniPropertyCard(props) {
     ? property._amenityMatches.filter(function (m) {
         return !!(m && m.matched === true && m.nearestPOI);
       })
+    : [];
+
+  // Deterministic explainability (server/services/recommendationService.js's
+  // buildMatchReasons) - filtered here to drop entries that duplicate what
+  // verifiedAmenities above already shows in full detail (icon/name/
+  // distance/travel time); amenity-matched reasons always end in " away" by
+  // construction, so this is a cheap, reliable way to keep the card to only
+  // NEW information (hard-filter facts, soft-feature matches) without
+  // re-parsing category names. Capped small on the backend already (max 4);
+  // this only ever narrows further, never adds.
+  var extraMatchReasons = Array.isArray(property._matchReasons)
+    ? property._matchReasons.filter(function (r) { return r.indexOf(" away") === -1; })
+    : [];
+  // Unmatched preferences ARE new information the existing card never
+  // showed (verifiedAmenities only ever lists MATCHED amenities) - amenity
+  // "not verified" entries end with " not verified" or " not verified
+  // within X km" by construction (see buildMatchReasons), soft-feature ones
+  // end with " not confirmed".
+  var unmatchedPreferences = Array.isArray(property._unmatchedPreferences)
+    ? property._unmatchedPreferences
     : [];
 
   // PART 5: same double-check as MapPage's recommendationData / the
@@ -582,6 +608,50 @@ function MiniPropertyCard(props) {
           </Box>
         )}
 
+        {/* Deterministic explainability (section 8) - concrete facts only,
+            built server-side from real hard-filter/soft-feature/amenity
+            evidence, never invented by the LLM. Kept small (backend already
+            caps matchReasons at 4, and this only narrows further) so the
+            card never feels cluttered. */}
+        {(extraMatchReasons.length > 0 || unmatchedPreferences.length > 0) && (
+          <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.4, mb: 1 }}>
+            {extraMatchReasons.map(function (reason, ri) {
+              return (
+                <Chip
+                  key={"match-" + ri}
+                  label={reason}
+                  size="small"
+                  sx={{
+                    fontSize: "0.6rem",
+                    height: 18,
+                    borderRadius: "5px",
+                    color: theme.palette.success.main,
+                    bgcolor: alpha(theme.palette.success.main, 0.1),
+                    "& .MuiChip-label": { px: 0.7 },
+                  }}
+                />
+              );
+            })}
+            {unmatchedPreferences.map(function (reason, ui) {
+              return (
+                <Chip
+                  key={"unmatched-" + ui}
+                  label={t("notConfirmed") + ": " + reason}
+                  size="small"
+                  sx={{
+                    fontSize: "0.6rem",
+                    height: 18,
+                    borderRadius: "5px",
+                    color: "text.secondary",
+                    bgcolor: alpha(theme.palette.text.secondary, 0.1),
+                    "& .MuiChip-label": { px: 0.7 },
+                  }}
+                />
+              );
+            })}
+          </Box>
+        )}
+
         <Divider sx={{ my: 0.5 }} />
 
         <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mt: 0.5 }}>
@@ -764,6 +834,20 @@ export default function AIChatbot() {
         .slice(-MAX_HISTORY_MESSAGES * 2)
         .map(function (m) { return { role: m.role, content: m.content }; });
 
+      // Deterministic multi-turn merge (server/services/intentService.js's
+      // mergeIntent) needs the FULL previous turn's structured intent, not
+      // just raw text - find the most recent assistant message that carried
+      // one. This is per-conversation only (bounded by `messages`, the same
+      // in-memory/localStorage state already scoped to this chat widget) -
+      // never persisted server-side, never leaks into an unrelated chat.
+      var previousIntent = null;
+      for (var mi = messages.length - 1; mi >= 0; mi--) {
+        if (messages[mi].role === "assistant" && messages[mi].metadata && messages[mi].metadata.structuredIntent) {
+          previousIntent = messages[mi].metadata.structuredIntent;
+          break;
+        }
+      }
+
       var response = await fetch(API_ENDPOINT, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -771,6 +855,7 @@ export default function AIChatbot() {
           message: userMessage,
           conversationHistory: historyToSend.slice(0, -1),
           language: getLanguageCode(),
+          previousIntent: previousIntent,
         }),
       });
 
@@ -937,6 +1022,26 @@ export default function AIChatbot() {
                 >
                   {sectionLabel}
                 </Typography>
+              )}
+              {/* Non-empty relaxedConstraints means NO exact match existed -
+                  this is an alternative (see ragService.js's
+                  searchProgressively) - shown as a clearly separate badge so
+                  it's never mistaken for an exact match, per the "must
+                  clearly tell the user" requirement. */}
+              {msg.metadata && Array.isArray(msg.metadata.relaxedConstraints) && msg.metadata.relaxedConstraints.length > 0 && (
+                <Chip
+                  size="small"
+                  label={t("alternativeResult")}
+                  sx={{
+                    alignSelf: "flex-start",
+                    fontSize: "0.65rem",
+                    fontWeight: 700,
+                    height: 20,
+                    borderRadius: "6px",
+                    color: theme.palette.warning.main,
+                    bgcolor: alpha(theme.palette.warning.main, 0.12),
+                  }}
+                />
               )}
               {msg.properties.slice(0, 5).map(function (property, i) {
                 // Reuses the backend's existing geocoded search-location
