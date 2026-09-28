@@ -23,7 +23,13 @@ const HeroSection = () => {
     <Box
       sx={{
         position: "relative",
-        minHeight: { xs: 420, sm: 480, md: 560 },
+        // md previously jumped to 560 - taller than sm's own 480 for no
+        // real reason (hero content - headline/subtitle/search panel -
+        // comfortably fits well under 480 even on desktop), which made the
+        // hero visually dominate the page and pushed Featured Properties
+        // further down than necessary. Capped at 480 across sm and up, in
+        // the "wide and premium, not oversized" ~420-480px range.
+        minHeight: { xs: 420, sm: 480 },
         py: { xs: 5, md: 6 },
         display: "flex",
         alignItems: "center",
