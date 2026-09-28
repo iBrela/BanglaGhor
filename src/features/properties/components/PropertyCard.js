@@ -21,13 +21,25 @@ import BathtubIcon from "@mui/icons-material/Bathtub";
 import SquareFootIcon from "@mui/icons-material/SquareFoot";
 import HomeWorkIcon from "@mui/icons-material/HomeWork";
 import MapIcon from "@mui/icons-material/Map";
+import BookmarkRemoveIcon from "@mui/icons-material/BookmarkRemove";
 import WishlistButton from "./WishlistButton";
 import { getPropertyCoordinates } from "../../../shared/propertyLocation";
 
-// showViewOnMap is optional and defaults to off - only FeaturedProperties.js
-// currently enables it. The other existing PropertyCard usages
-// (PropertiesPage.js, Saved.js, MyListingsPage.js) are unaffected.
-const PropertyCard = ({ property, isWishlisted, onWishlistToggle, showViewOnMap = false }) => {
+// showViewOnMap and onUntrack are both optional, off by default - only the
+// callers that need them (FeaturedProperties.js for showViewOnMap,
+// MyPropertyPage.js's Tracked Properties section for onUntrack) pass them.
+// The other existing PropertyCard usages (PropertiesPage.js, Saved.js,
+// MyListingsPage.js) are unaffected either way. onUntrack is deliberately
+// NOT wired to the wishlist - it's for the separate TrackedProperty feature
+// (see server/models/TrackedProperty.js), never the wishlist.
+const PropertyCard = ({
+  property,
+  isWishlisted,
+  onWishlistToggle,
+  showViewOnMap = false,
+  onUntrack,
+  untracking = false,
+}) => {
   const theme = useTheme();
   const navigate = useNavigate();
 
@@ -59,7 +71,13 @@ const PropertyCard = ({ property, isWishlisted, onWishlistToggle, showViewOnMap 
       },
     });
   };
- 
+
+  const handleUntrackClick = (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (onUntrack && !untracking) onUntrack(property);
+  };
+
   const placeholderImg = `/pictures/placeholder.png`;
  
   let imgSrc = placeholderImg;
@@ -317,30 +335,52 @@ const PropertyCard = ({ property, isWishlisted, onWishlistToggle, showViewOnMap 
             )}
           </Box>
 
-          {/* View on Map - compact, only for a genuinely usable location.
-              Sits below price/type rather than beside them so it never
-              covers the favourite button, Buy/Rent badge, property-type
-              badge, price, or bed/bath/area figures. */}
-          {canShowOnMap && (
-            <Chip
-              icon={<MapIcon sx={{ fontSize: "0.8rem !important" }} />}
-              label="View on Map"
-              size="small"
-              onClick={handleViewOnMap}
-              clickable
-              variant="outlined"
-              sx={{
-                mt: 1,
-                alignSelf: "flex-start",
-                fontWeight: 600,
-                fontSize: "0.7rem",
-                height: 24,
-                borderRadius: "6px",
-                color: "primary.main",
-                borderColor: "primary.main",
-                bgcolor: alpha(theme.palette.primary.main, 0.06),
-              }}
-            />
+          {/* View on Map / Untrack - compact, sits below price/type rather
+              than beside them so neither ever covers the favourite button,
+              Buy/Rent badge, property-type badge, price, or bed/bath/area
+              figures. Wraps if both are present. */}
+          {(canShowOnMap || onUntrack) && (
+            <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1, mt: 1 }}>
+              {canShowOnMap && (
+                <Chip
+                  icon={<MapIcon sx={{ fontSize: "0.8rem !important" }} />}
+                  label="View on Map"
+                  size="small"
+                  onClick={handleViewOnMap}
+                  clickable
+                  variant="outlined"
+                  sx={{
+                    fontWeight: 600,
+                    fontSize: "0.7rem",
+                    height: 24,
+                    borderRadius: "6px",
+                    color: "primary.main",
+                    borderColor: "primary.main",
+                    bgcolor: alpha(theme.palette.primary.main, 0.06),
+                  }}
+                />
+              )}
+              {onUntrack && (
+                <Chip
+                  icon={<BookmarkRemoveIcon sx={{ fontSize: "0.8rem !important" }} />}
+                  label={untracking ? "Untracking…" : "Untrack"}
+                  size="small"
+                  onClick={handleUntrackClick}
+                  disabled={untracking}
+                  clickable
+                  variant="outlined"
+                  sx={{
+                    fontWeight: 600,
+                    fontSize: "0.7rem",
+                    height: 24,
+                    borderRadius: "6px",
+                    color: theme.palette.secondary.main,
+                    borderColor: theme.palette.secondary.main,
+                    bgcolor: alpha(theme.palette.secondary.main, 0.06),
+                  }}
+                />
+              )}
+            </Box>
           )}
         </CardContent>
       </Card>

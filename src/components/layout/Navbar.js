@@ -9,16 +9,16 @@ import {
   useScrollTrigger,
   Slide,
   Container,
-  Snackbar,
-  Alert,
   Menu,
   MenuItem,
   Badge,
   ListItemText,
   Avatar,
   Divider,
+  Tooltip,
 } from "@mui/material";
 import NotificationsIcon from "@mui/icons-material/Notifications";
+import AccountCircleOutlinedIcon from "@mui/icons-material/AccountCircleOutlined";
 import { styled, alpha, useTheme } from "@mui/material/styles";
 import MenuIcon from "@mui/icons-material/Menu";
 import { useAuth } from "../../context/AuthContext";
@@ -27,7 +27,6 @@ import { getConversationsSummary as fetchConversationsSummaryForMenu } from "../
 import { useNavigate, useLocation, Link as RouterLink } from "react-router-dom";
 import DesktopNav from "./DesktopNav";
 import MobileDrawer from "./MobileDrawer";
-import ProfileMenu from "./ProfileMenu";
 import LanguageToggle from "../common/LanguageToggle";
 import ThemeToggle from "../common/ThemeToggle";
 import HomeIcon from "@mui/icons-material/Home";
@@ -58,14 +57,13 @@ const NavbarContainer = styled(AppBar)(({ theme }) => ({
 }));
  
 const Navbar = () => {
-  const { isLoggedIn, user, logout, idToken } = useAuth();
+  const { isLoggedIn, user, idToken } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const { t } = useTranslation();
   const theme = useTheme();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [activeLink, setActiveLink] = useState("home");
-  const [logoutSnackbar, setLogoutSnackbar] = useState(false);
   const [uploadIdModalOpen, setUploadIdModalOpen] = useState(false);
  
   const {
@@ -145,18 +143,7 @@ const Navbar = () => {
         break;
     }
   };
- 
-  const handleLogout = () => {
-    logout();
-    setLogoutSnackbar(true);
-    navigate("/");
-  };
- 
-  const handleCloseLogoutSnackbar = (event, reason) => {
-    if (reason === "clickaway") return;
-    setLogoutSnackbar(false);
-  };
- 
+
   const handleNotificationIconClick = async (event) => {
     setNotificationAnchorEl(event.currentTarget);
     if (
@@ -258,7 +245,20 @@ const Navbar = () => {
                 <ThemeToggle />
                 <LanguageToggle />
                 {isLoggedIn ? (
-                  <ProfileMenu handleLogout={handleLogout} />
+                  <Tooltip title={t("account_tooltip", "Account")}>
+                    <IconButton
+                      component={RouterLink}
+                      to="/account"
+                      color="inherit"
+                      aria-label="Account"
+                      sx={{
+                        color: "text.secondary",
+                        "&:hover": { color: "primary.main", backgroundColor: "action.hover" },
+                      }}
+                    >
+                      <AccountCircleOutlinedIcon fontSize="small" />
+                    </IconButton>
+                  </Tooltip>
                 ) : (
                   <Button
                     component={RouterLink}
@@ -275,7 +275,7 @@ const Navbar = () => {
                   </Button>
                 )}
               </Box>
- 
+
               {/* Mobile Navigation Area */}
               <Box
                 sx={{
@@ -302,7 +302,20 @@ const Navbar = () => {
                 <ThemeToggle />
                 <LanguageToggle />
                 {isLoggedIn ? (
-                  <ProfileMenu handleLogout={handleLogout} />
+                  <Tooltip title={t("account_tooltip", "Account")}>
+                    <IconButton
+                      component={RouterLink}
+                      to="/account"
+                      color="inherit"
+                      aria-label="Account"
+                      sx={{
+                        color: "text.secondary",
+                        "&:hover": { color: "primary.main", backgroundColor: "action.hover" },
+                      }}
+                    >
+                      <AccountCircleOutlinedIcon fontSize="small" />
+                    </IconButton>
+                  </Tooltip>
                 ) : (
                   <Button
                     component={RouterLink}
@@ -435,21 +448,6 @@ const Navbar = () => {
         open={uploadIdModalOpen}
         onClose={handleCloseUploadModal}
       />
-      <Snackbar
-        open={logoutSnackbar}
-        autoHideDuration={3000}
-        onClose={handleCloseLogoutSnackbar}
-        anchorOrigin={{ vertical: "top", horizontal: "center" }}
-      >
-        <Alert
-          onClose={handleCloseLogoutSnackbar}
-          severity="success"
-          variant="filled"
-          sx={{ width: "100%", borderRadius: "8px" }}
-        >
-          {t("logout_successful", "Successfully logged out!")}
-        </Alert>
-      </Snackbar>
     </>
   );
 };

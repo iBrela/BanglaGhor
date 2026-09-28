@@ -32,6 +32,7 @@ import DirectionsWalkIcon from "@mui/icons-material/DirectionsWalk";
 import DirectionsBikeIcon from "@mui/icons-material/DirectionsBike";
 import CloseIcon from "@mui/icons-material/Close";
 import { useNavigate } from "react-router-dom";
+import { useTheme, alpha } from "@mui/material/styles";
 import { useTranslation } from "react-i18next";
 import { getPropertyCoordinates } from "../../../shared/propertyLocation";
 
@@ -150,6 +151,7 @@ const PropertyInfoPanel = ({
 }) => {
   const navigate = useNavigate();
   const { t } = useTranslation();
+  const theme = useTheme();
 
   if (!selectedProperty) {
     return null;
@@ -231,9 +233,15 @@ const PropertyInfoPanel = ({
         p: 2,
         borderTopLeftRadius: "12px",
         borderTopRightRadius: "12px",
-        backgroundColor: "rgba(255, 255, 255, 0.95)",
+        // Theme-aware surface (was a hardcoded white background) - in dark
+        // mode that hardcoded white panel was fighting the Typography
+        // elements below, which already correctly use theme.palette.text.*
+        // and rendered near-invisible light-on-light. Using the theme's own
+        // surface colour here lets that existing text colouring finally
+        // read correctly against the panel it's actually sitting on.
+        backgroundColor: alpha(theme.palette.background.paper, 0.95),
         backdropFilter: "blur(5px)",
-        borderTop: "1px solid rgba(0,0,0,0.1)",
+        borderTop: `1px solid ${theme.palette.divider}`,
       }}
     >
       {/* Location Accuracy Warning for district-level or approximate */}
@@ -411,7 +419,7 @@ const PropertyInfoPanel = ({
           sx={{
             mt: 1.5,
             pt: 1.5,
-            borderTop: "1px solid rgba(0,0,0,0.08)",
+            borderTop: `1px solid ${theme.palette.divider}`,
             display: "flex",
             alignItems: "center",
             flexWrap: "wrap",

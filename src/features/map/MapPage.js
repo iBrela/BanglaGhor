@@ -22,7 +22,9 @@ import {
   Paper,
   InputAdornment,
   Chip,
+  useMediaQuery,
 } from "@mui/material";
+import { useTheme } from "@mui/material/styles";
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import MyLocationIcon from "@mui/icons-material/MyLocation";
 import FilterListIcon from "@mui/icons-material/FilterList";
@@ -31,6 +33,7 @@ import SearchIcon from "@mui/icons-material/Search";
 import InfoIcon from "@mui/icons-material/Info";
 import LocationOnIcon from "@mui/icons-material/LocationOn";
 import HomeWorkIcon from "@mui/icons-material/HomeWork";
+import axios from "axios";
 import { useTranslation } from "react-i18next";
 import { getPropertyCoordinates } from "../../shared/propertyLocation";
 import MapComponent from "./components/MapComponent";
@@ -39,6 +42,30 @@ import FilterSidebar from "../properties/components/FilterSidebar";
 import useMapData from "./hooks/useMapData";
 import useLocationSearch from "./hooks/useLocationSearch";
 import useRouting from "./hooks/useRouting";
+
+const API_BASE_URL = process.env.REACT_APP_API_URL || "http://localhost:5001/api";
+// The existing /api/pois/nearby endpoint's own hard cap on `limit` (see
+// server/controllers/poiController.js's MAX_LIMIT) - requested explicitly so
+// "show ALL matching POIs" gets as complete a result as the existing backend
+// already allows, without inventing a new, unrelated cap here. No `radius`
+// is ever sent when the user gave no explicit distance (see
+// fetchAmenityPois below) - that leaves the backend's own existing default
+// radius (poiController.js's DEFAULT_RADIUS_METERS) in effect, per the
+// "reuse the backend's existing default" requirement.
+const POI_FETCH_LIMIT = 50;
+
+// Measured directly from ai_chatbot.js's own floating panel (not guessed):
+// the fixed wrapper sits at `right: 24`, and the Paper itself is `width: 400`
+// on the "sm" breakpoint and up (MUI's own theme.breakpoints, the same one
+// used below) - so on desktop the chatbot occupies the rightmost
+// ~424px of the viewport when open. On "xs" (mobile) that same panel is a
+// near-fullscreen overlay (width: calc(100vw - 48px), height: calc(100vh -
+// 140px)) rather than a side panel, so no right-side reservation makes sense
+// there - see isDesktopChatbotWidth below.
+const CHATBOT_PANEL_WIDTH = 400;
+const CHATBOT_PANEL_RIGHT_OFFSET = 24;
+const CHATBOT_CLEARANCE_MARGIN = 30;
+const RECOMMENDATION_FIT_BASE_PADDING = 70;
 
 // Zoom level to jump to when a place-search result is selected, keyed by
 // Photon's own normalized "type" field (verified against real API responses
@@ -80,6 +107,11 @@ const MapPage = () => {
   const navigate = useNavigate();
   const routerLocation = useLocation();
   const { t, i18n } = useTranslation();
+  const theme = useTheme();
+  // Same "sm" breakpoint ai_chatbot.js's own panel styling switches on
+  // (width: {xs: "calc(100vw - 48px)", sm: 400}) - not a separately chosen
+  // number, so this stays in sync with that component's actual layout.
+  const isDesktopChatbotWidth = useMediaQuery(theme.breakpoints.up("sm"));
 
   const [searchQuery, setSearchQuery] = useState("");
   
@@ -114,13 +146,17 @@ const MapPage = () => {
   // recommended property with no real geocoded location is silently
   // excluded from the map here, never plotted at a fake centroid as if it
   // were the real recommendation.
+  // NOTE: this derives the verifiable property list and the set of
+  // REQUESTED amenity categories/radii only - it deliberately no longer
+  // derives POI markers itself (that was the old, insufficient
+  // "_amenityMatches[].nearestPOI only" approach, which could only ever show
+  // ONE POI per category - see fetchAmenityPois below, which queries the
+  // real /api/pois/nearby endpoint for every matching POI instead).
   const recommendationData = useMemo(() => {
     const rawProperties = routerLocation.state?.recommendedProperties;
     if (!Array.isArray(rawProperties) || rawProperties.length === 0) return null;
 
     const properties = [];
-    const poiByKey = new Map();
-
     rawProperties.forEach((rawProperty) => {
       // Two checks are both required, not just getPropertyCoordinates()
       // alone: a "district-level" property's geoLocation.coordinates is
@@ -132,58 +168,219 @@ const MapPage = () => {
       // locationAccuracy is what actually distinguishes them - the same gate
       // recommendationService.js's own getVerifiableCoordinates() already
       // uses server-side, mirrored here so the map can never plot a
-      // district-level property as if it were a precise recommendation.
+      // district-level property as if it were a precise recommendation, and
+      // never becomes the origin of a nearby-POI search either.
       const isVerifiableAccuracy =
         rawProperty.locationAccuracy === "precise" ||
         rawProperty.locationAccuracy === "approximate";
       const coords = isVerifiableAccuracy ? getPropertyCoordinates(rawProperty) : null;
       if (!coords) return; // no real, trustworthy coordinates - excluded, not faked
       properties.push({ ...rawProperty, position: coords });
+    });
 
+    // The requested-amenity intent (category + the user's own requested
+    // radius, when they gave one) - read directly off the backend's already-
+    // computed _amenityMatches (recommendationService.js's
+    // findNearestAmenityMatch: { category, requestedMaxDistanceKm, ... }),
+    // never re-parsed from chat text. Every candidate property was analyzed
+    // against the exact same amenities list server-side (ragService.js's
+    // runRAG), so this is deduped by category (first-seen wins) rather than
+    // unioned per-property - there is only ever one true intent list per
+    // chatbot response. Derived from ALL raw properties (not just the
+    // verifiable ones above) since even a district-level candidate still
+    // carries the full, correctly-shaped amenityMatches array.
+    const amenityByCategory = new Map();
+    rawProperties.forEach((rawProperty) => {
       if (!Array.isArray(rawProperty._amenityMatches)) return;
       rawProperty._amenityMatches.forEach((match) => {
-        // Only already-verified matches with a real, geolocated POI - never
-        // an unmatched entry, never invented, never a new lookup.
-        if (!match || match.matched !== true || !match.nearestPOI) return;
-        const geo = match.nearestPOI.geoLocation;
-        const poiCoords = geo && geo.coordinates;
-        if (!Array.isArray(poiCoords) || poiCoords.length !== 2) return;
-        const [lng, lat] = poiCoords;
-        if (!Number.isFinite(lng) || !Number.isFinite(lat)) return;
-
-        // Dedup key: category + coordinates rounded to ~4 decimal places
-        // (~10m, matching routingService.js's own established rounding
-        // precedent) - category included so two genuinely different POIs
-        // that happen to sit at the same rounded point are never merged.
-        const key = `${match.category}:${lng.toFixed(4)},${lat.toFixed(4)}`;
-        if (!poiByKey.has(key)) {
-          poiByKey.set(key, {
-            name: match.nearestPOI.name || null,
-            category: match.category,
-            coordinates: [lng, lat],
-          });
-        }
+        if (!match || !match.category || amenityByCategory.has(match.category)) return;
+        amenityByCategory.set(match.category, {
+          category: match.category,
+          maxDistanceKm:
+            typeof match.requestedMaxDistanceKm === "number" ? match.requestedMaxDistanceKm : null,
+        });
       });
     });
 
     if (properties.length === 0) return null;
-    return { properties, pois: Array.from(poiByKey.values()) };
+    return { properties, amenityIntent: Array.from(amenityByCategory.values()) };
   }, [routerLocation.state]);
 
-  // Camera strategy for recommendation mode - computed once from the
-  // (static, derived-from-router-state) recommendation data above. A single
-  // distinct point centers/zooms directly (avoids fitBounds on a zero-area
-  // box); 2+ distinct points fit as a box, reusing MapComponent's own
-  // existing fitBounds logic (see its `initialFitBounds` prop) rather than
-  // duplicating camera math here.
+  const [recommendationPois, setRecommendationPois] = useState([]);
+  const [poisLoading, setPoisLoading] = useState(false);
+  const poiFetchSeq = useRef(0);
+
+  // Fetches ALL real POIs (not just the single nearest one per category)
+  // matching every requested amenity category, around EVERY verifiable
+  // recommended property, via the existing /api/pois/nearby endpoint -
+  // reused as-is, no new backend endpoint. Bounded: only verifiable
+  // properties × only requested categories × the endpoint's own existing
+  // limit/radius caps (see POI_FETCH_LIMIT above) - for a typical chatbot
+  // result (<=5 candidates, ragService.js's CONFIG.MAX_RESULTS, and
+  // typically 1-3 requested categories) this is at most ~15 small indexed
+  // geo queries, run concurrently. A request-sequence guard (poiFetchSeq)
+  // discards any response superseded by a newer navigation before it can
+  // apply stale results, the same pattern used elsewhere in this app (see
+  // MyPropertyPage.js's fetchTrackedProperties).
+  useEffect(() => {
+    if (!recommendationData || recommendationData.amenityIntent.length === 0) {
+      setRecommendationPois([]);
+      setPoisLoading(false);
+      return;
+    }
+
+    const seq = ++poiFetchSeq.current;
+    setPoisLoading(true);
+
+    const tasks = [];
+    recommendationData.properties.forEach((property) => {
+      recommendationData.amenityIntent.forEach((amenity) => {
+        tasks.push(
+          axios
+            .get(`${API_BASE_URL}/pois/nearby`, {
+              params: {
+                lat: property.position.lat,
+                lng: property.position.lng,
+                category: amenity.category,
+                limit: POI_FETCH_LIMIT,
+                // Only sent when the user actually requested a distance for
+                // this category - otherwise omitted entirely so the backend
+                // applies ITS OWN existing default radius
+                // (poiController.js's DEFAULT_RADIUS_METERS), never a second,
+                // frontend-invented default.
+                ...(amenity.maxDistanceKm != null
+                  ? { radius: Math.round(amenity.maxDistanceKm * 1000) }
+                  : {}),
+              },
+            })
+            .then((res) => (res.data && Array.isArray(res.data.results) ? res.data.results : []))
+            .catch((err) => {
+              // One failing category/property pair must not break the whole
+              // map - keep every other successfully-loaded category/property
+              // (Promise.all below still resolves; this task just
+              // contributes nothing). `null` (not []) so the aggregation
+              // below can tell "this query genuinely found nothing" apart
+              // from "this query failed", to surface a subtle warning for
+              // the latter without ever fabricating a replacement result.
+              console.error(
+                `Error fetching nearby "${amenity.category}" POIs for "${property.title || property._id}":`,
+                err.message
+              );
+              return null;
+            })
+        );
+      });
+    });
+
+    Promise.all(tasks).then((resultLists) => {
+      if (seq !== poiFetchSeq.current) return; // superseded by a newer navigation
+
+      if (resultLists.some((list) => list === null)) {
+        setNotification({
+          open: true,
+          message: t(
+            "map_poi_partial_error",
+            "Some nearby places could not be loaded."
+          ),
+          severity: "warning",
+        });
+      }
+
+      // Dedup: the same real POI can legitimately be found by more than one
+      // recommended property's search (View all on map) - never rendered
+      // twice. Prefer the POI's own stable Mongo _id (poiService.js's
+      // findNearbyPOIs returns it as `id`); only falls back to a
+      // category+coordinate+name key on the (expected-never) chance a result
+      // is missing it. Keeps the SMALLEST distanceMeters seen across every
+      // property that matched it, for the popup's "X m from recommended
+      // property" text - a real, backend-computed distance, never invented.
+      const byId = new Map();
+      resultLists.forEach((list) => {
+        if (!Array.isArray(list)) return; // a failed task (null) - skip, already surfaced above
+        list.forEach((poi) => {
+          const coords = poi.geoLocation && poi.geoLocation.coordinates;
+          if (!Array.isArray(coords) || coords.length !== 2) return;
+          const [lng, lat] = coords;
+          if (!Number.isFinite(lng) || !Number.isFinite(lat)) return;
+
+          const key = poi.id
+            ? String(poi.id)
+            : `${poi.category}:${lng.toFixed(4)},${lat.toFixed(4)}:${poi.name || ""}`;
+          const existing = byId.get(key);
+          const distanceMeters =
+            typeof poi.distanceMeters === "number" ? poi.distanceMeters : null;
+          if (
+            !existing ||
+            existing.distanceMeters === null ||
+            (distanceMeters !== null && distanceMeters < existing.distanceMeters)
+          ) {
+            byId.set(key, {
+              name: poi.name || poi.nameEn || poi.nameBn || null,
+              category: poi.category,
+              coordinates: [lng, lat],
+              distanceMeters,
+            });
+          }
+        });
+      });
+
+      setRecommendationPois(Array.from(byId.values()));
+      setPoisLoading(false);
+    });
+  }, [recommendationData, t]);
+
+  // Camera strategy for recommendation mode - a single distinct point
+  // centers/zooms directly (avoids fitBounds on a zero-area box); 2+
+  // distinct points fit as a box, reusing MapComponent's own existing
+  // fitBounds logic (see its `initialFitBounds` prop) rather than
+  // duplicating camera math here. Recomputed as recommendationPois arrives
+  // (asynchronously, see above) so the camera widens from a tight
+  // single-property zoom to a bounds-fit once POIs load, rather than only
+  // ever reflecting the properties that were known at mount time.
+  //
+  // Bounded strategy (properties are the primary geographic objects, POIs
+  // are context): bounds are derived from the recommended properties FIRST,
+  // and a POI only expands that box when it sits reasonably close to the
+  // existing property cluster - a POI far outside the neighbourhood (e.g.
+  // the only real match for a generously-radius'd request) still renders on
+  // the map, it just doesn't force the whole camera to zoom out to include
+  // it. Never removes or hides a valid POI, only decides what the INITIAL
+  // camera frames.
   const recommendationCamera = useMemo(() => {
     if (!recommendationData) return null;
-    const allCoords = [
-      ...recommendationData.properties.map((p) => [p.position.lng, p.position.lat]),
-      ...recommendationData.pois.map((p) => p.coordinates),
-    ];
-    if (allCoords.length === 0) return null;
+    const propertyCoords = recommendationData.properties.map((p) => [p.position.lng, p.position.lat]);
+    if (propertyCoords.length === 0) return null;
 
+    function boundsOf(coordList) {
+      let minLng = Infinity, minLat = Infinity, maxLng = -Infinity, maxLat = -Infinity;
+      coordList.forEach(([lng, lat]) => {
+        if (lng < minLng) minLng = lng;
+        if (lng > maxLng) maxLng = lng;
+        if (lat < minLat) minLat = lat;
+        if (lat > maxLat) maxLat = lat;
+      });
+      return { minLng, minLat, maxLng, maxLat };
+    }
+
+    const propertyBounds = boundsOf(propertyCoords);
+    const propertyDiagonal = Math.hypot(
+      propertyBounds.maxLng - propertyBounds.minLng,
+      propertyBounds.maxLat - propertyBounds.minLat
+    );
+    const centerLng = (propertyBounds.minLng + propertyBounds.maxLng) / 2;
+    const centerLat = (propertyBounds.minLat + propertyBounds.maxLat) / 2;
+    // 1.5x the property cluster's own diagonal, with a ~1.1km floor so a
+    // single tight property (diagonal ~0) still has a sensible radius to
+    // decide "is this POI reasonably close" against.
+    const expansionRadiusDegrees = Math.max(propertyDiagonal * 1.5, 0.01);
+
+    const nearbyPoiCoords = recommendationPois
+      .map((p) => p.coordinates)
+      .filter(
+        ([lng, lat]) => Math.hypot(lng - centerLng, lat - centerLat) <= expansionRadiusDegrees
+      );
+
+    const allCoords = [...propertyCoords, ...nearbyPoiCoords];
     const uniqueKeys = new Set(
       allCoords.map(([lng, lat]) => `${lng.toFixed(5)},${lat.toFixed(5)}`)
     );
@@ -192,15 +389,43 @@ const MapPage = () => {
       return { mode: "point", center: [lat, lng], zoom: 15 };
     }
 
-    let minLng = Infinity, minLat = Infinity, maxLng = -Infinity, maxLat = -Infinity;
-    allCoords.forEach(([lng, lat]) => {
-      if (lng < minLng) minLng = lng;
-      if (lng > maxLng) maxLng = lng;
-      if (lat < minLat) minLat = lat;
-      if (lat > maxLat) maxLat = lat;
-    });
-    return { mode: "bounds", bounds: [[minLng, minLat], [maxLng, maxLat]] };
-  }, [recommendationData]);
+    const finalBounds = boundsOf(allCoords);
+    return {
+      mode: "bounds",
+      bounds: [
+        [finalBounds.minLng, finalBounds.minLat],
+        [finalBounds.maxLng, finalBounds.maxLat],
+      ],
+    };
+  }, [recommendationData, recommendationPois]);
+
+  // ai_chatbot.js's floating panel is visible (it's how the user got here -
+  // "View on map"/"View all on map" only exist inside that open panel) and
+  // occupies the right side of the screen on desktop, so recommendation-mode
+  // fitBounds/camera padding reserves that space instead of treating the
+  // whole canvas as equally visible. Undefined outside recommendation mode -
+  // MapComponent's own small symmetric default applies for normal /map
+  // browsing, matching its pre-existing behaviour exactly.
+  const recommendationFitPadding = useMemo(() => {
+    if (!recommendationData) return undefined;
+    if (!isDesktopChatbotWidth) {
+      // Mobile: ai_chatbot.js's panel is a near-fullscreen overlay there,
+      // not a side panel - no right-side reservation makes sense, just a
+      // normal symmetric margin so the property/POIs aren't flush with the
+      // screen edge.
+      return RECOMMENDATION_FIT_BASE_PADDING;
+    }
+    return {
+      top: RECOMMENDATION_FIT_BASE_PADDING,
+      bottom: RECOMMENDATION_FIT_BASE_PADDING,
+      left: RECOMMENDATION_FIT_BASE_PADDING,
+      right:
+        RECOMMENDATION_FIT_BASE_PADDING +
+        CHATBOT_PANEL_WIDTH +
+        CHATBOT_PANEL_RIGHT_OFFSET +
+        CHATBOT_CLEARANCE_MARGIN,
+    };
+  }, [recommendationData, isDesktopChatbotWidth]);
 
   const {
     properties: allMappableProperties,
@@ -218,6 +443,23 @@ const MapPage = () => {
     goToLocation,
     restoreMapState,
   } = useMapData(propertyCode, { skipInitialFetch: !!recommendationData });
+
+  // Individual chatbot "View on Map" (exactly one verifiable recommended
+  // property) auto-selects that property, the same way clicking its pin
+  // would - it must be "immediately obvious this is the property I
+  // clicked": the selected-property halo (see MapComponent.js) and
+  // PropertyInfoPanel both key off `selectedProperty`, so without this the
+  // recommended property would render as just another normal, unselected
+  // pin. "View all on map" (2+ properties) intentionally does NOT
+  // auto-select any single one of them - keyed only on `recommendationData`
+  // (stable per navigation) so this runs once per "View on map" click, not
+  // on every later re-render (e.g. once POIs finish loading).
+  useEffect(() => {
+    if (recommendationData && recommendationData.properties.length === 1) {
+      handleSelectProperty(recommendationData.properties[0]);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [recommendationData]);
 
   const { results: placeResults, status: placeSearchStatus } =
     useLocationSearch(searchQuery, i18n.language);
@@ -846,13 +1088,42 @@ const MapPage = () => {
             onMarkerClick={onMarkerPropertySelect}
             onMapMove={handleMapMove}
             route={route}
-            pois={recommendationData ? recommendationData.pois : []}
+            pois={recommendationPois}
             initialFitBounds={
               recommendationCamera?.mode === "bounds"
                 ? recommendationCamera.bounds
                 : null
             }
+            fitPadding={recommendationFitPadding}
           />
+        )}
+        {/* Small, non-blocking indicator while requested-amenity POIs are
+            still loading (property markers are already visible by this
+            point - this never blocks or replaces the map itself, per the
+            "should not silently look empty while POIs are loading"
+            requirement). */}
+        {poisLoading && (
+          <Box
+            sx={{
+              position: "absolute",
+              bottom: 12,
+              right: 12,
+              zIndex: 5,
+              display: "flex",
+              alignItems: "center",
+              gap: 1,
+              px: 1.5,
+              py: 0.75,
+              borderRadius: "8px",
+              bgcolor: "background.paper",
+              boxShadow: 2,
+            }}
+          >
+            <CircularProgress size={14} thickness={5} />
+            <Typography variant="caption" sx={{ fontSize: "0.7rem" }}>
+              {t("loading_nearby_places", "Loading nearby places...")}
+            </Typography>
+          </Box>
         )}
         {selectedProperty && (
           <PropertyInfoPanel

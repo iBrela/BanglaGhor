@@ -83,11 +83,11 @@ export default function ProfileMenu({ handleLogout }) {
         anchorOrigin={{ vertical: "bottom", horizontal: "right" }}
         transformOrigin={{ vertical: "top", horizontal: "right" }}
       >
-        <MenuItem onClick={() => go("/user-profile")}>
+        <MenuItem onClick={() => go("/account")}>
           <ListItemIcon>
             <AccountCircleIcon fontSize="small" />
           </ListItemIcon>
-          <ListItemText>{t("nav_profile")}</ListItemText>
+          <ListItemText>{t("account_heading", "My Account")}</ListItemText>
         </MenuItem>
         <MenuItem onClick={() => go("/my-listings")}>
           <ListItemIcon>
@@ -111,7 +111,7 @@ export default function ProfileMenu({ handleLogout }) {
               <ChatIcon fontSize="small" />
             </Badge>
           </ListItemIcon>
-          <ListItemText>{t("nav_chat", "Chat")}</ListItemText>
+          <ListItemText>{t("nav_messages", "Messages")}</ListItemText>
         </MenuItem>
         {user?.isAdmin && [
           <Divider sx={{ my: 0.5 }} key="admin-divider" />,

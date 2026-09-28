@@ -156,6 +156,10 @@ const HomeMapPreview = () => {
               // small preview box, so Bangladesh should fill more of it,
               // without affecting the full /map page's fit.
               fitPadding={10}
+              // A floating legend would just be clutter on this compact
+              // homepage preview - the full /map page (MapComponent's own
+              // default) still shows it.
+              showLegend={false}
             />
           )}
         </Paper>

@@ -25,6 +25,8 @@ import PropertyDetailPage from "./features/properties/pages/PropertyDetailPage";
 import MapPage from "./features/map/MapPage";
 import Saved from "./pages/Saved";
 import UserProfilePage from "./features/profile/UserProfilePage";
+import AccountHubPage from "./features/profile/AccountHubPage";
+import MyPropertyPage from "./features/profile/MyPropertyPage";
 import AdminRoutes from "./admin/AdminRoutes";
 import AdminProtectedRoute from "./components/common/AdminProtectedRoute";
 import ChatPage from "./features/chat/ChatPage";
@@ -128,6 +130,8 @@ function App() {
                     element={<EditPropertyPage />}
                   />
                   <Route path="/user-profile" element={<UserProfilePage />} />
+                  <Route path="/account" element={<AccountHubPage />} />
+                  <Route path="/my-property" element={<MyPropertyPage />} />
                   <Route path="/chat" element={<ChatPage />} />
                   <Route path="/chat/:conversationId" element={<ChatPage />} />
                 </Route>
