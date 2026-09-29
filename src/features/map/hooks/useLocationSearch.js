@@ -62,9 +62,15 @@ export default function useLocationSearch(query, lang) {
       abortControllerRef.current = controller;
 
       setStatus("loading");
+      // i18next-browser-languagedetector can report a regional variant
+      // (e.g. "en-US", "bn-BD") straight from navigator.language - the
+      // backend's validator only accepts the bare "en"/"bn" the app
+      // actually ships, so normalize here rather than relaxing that
+      // validator (this hook is the only caller of this endpoint).
+      const apiLang = (lang || "").toLowerCase().startsWith("bn") ? "bn" : "en";
       axios
         .get(`${API_BASE_URL}/locations/search`, {
-          params: { q: trimmed, lang },
+          params: { q: trimmed, lang: apiLang },
           signal: controller.signal,
         })
         .then((response) => {

@@ -4,8 +4,15 @@ import LocationOnIcon from "@mui/icons-material/LocationOn";
 
 const PropertyCardSuggestion = ({ property, onSelect }) => {
   const placeholderImg = `${process.env.PUBLIC_URL}/pictures/placeholder.png`;
-  const imgSrc = property?.images?.[0] 
-    ? `${process.env.PUBLIC_URL}/pictures/${property.images[0]}`
+  const firstImage = property?.images?.[0];
+  // A real upload's image is already an absolute S3/Floci URL (see
+  // PropertyCard.js's own imgSrc logic) - only a bundled-static filename
+  // needs the /pictures/ prefix. Prepending it unconditionally produced a
+  // malformed nested URL for every non-static image.
+  const imgSrc = firstImage
+    ? (firstImage.startsWith("http://") || firstImage.startsWith("https://")
+        ? firstImage
+        : `${process.env.PUBLIC_URL}/pictures/${firstImage}`)
     : placeholderImg;
 
   const handleImageError = (e) => {
