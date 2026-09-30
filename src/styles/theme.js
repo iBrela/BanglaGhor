@@ -70,8 +70,14 @@ const buildTheme = (C, mode) =>
  
     components: {
       MuiCssBaseline: {
+        // DM Sans is loaded once, centrally, via the <link> in
+        // public/index.html - an `@import` here was a second, redundant
+        // load of the same font that also triggered the browser's
+        // "@import rules can't be after other rules" warning (MuiCssBaseline
+        // injects this string into a <style> tag after MUI's own base
+        // styles already exist, so the @import was never first in the
+        // cascade - the one case CSS forbids it).
         styleOverrides: `
-          @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap');
           html, body, #root {
             background-color: ${C.base};
             color: ${C.textPrimary};

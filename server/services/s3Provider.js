@@ -24,6 +24,7 @@
 const {
   S3Client,
   HeadBucketCommand,
+  CreateBucketCommand,
 } = require("@aws-sdk/client-s3");
 
 const VALID_MODES = ["aws", "floci", "auto"];
@@ -135,6 +136,51 @@ async function checkAwsAvailable() {
   }
 }
 
+// Buckets Floci needs, paired with the client already scoped to each (same
+// pairing checkAwsAvailable() above uses for the real buckets). Real AWS is
+// deliberately never included here or anywhere in this function - production
+// bucket provisioning is a separate, out-of-band operation this app never
+// performs at runtime, in any S3_MODE.
+const FLOCI_REQUIRED_BUCKETS = [
+  { client: flociGovtIdClient, bucket: GOVT_ID_BUCKET },
+  { client: flociPropertyImagesClient, bucket: PROPERTY_IMAGES_BUCKET },
+].filter((b) => b.bucket);
+
+// Idempotent Floci-only bootstrap: HeadBucket first, only CreateBucket if
+// that comes back not-found. An already-existing bucket is left completely
+// untouched (never emptied/recreated/overwritten) - this is safe to run on
+// every startup. Only called from inside ensureS3ProviderReady()'s own
+// memoized IIFE below, so it runs at most once per process and every
+// concurrent caller awaits that same single run rather than racing separate
+// creation attempts. Never logs credentials - only bucket names, which are
+// non-secret config already visible in .env.
+async function ensureFlociBucketsExist() {
+  for (const { client, bucket } of FLOCI_REQUIRED_BUCKETS) {
+    try {
+      await client.send(new HeadBucketCommand({ Bucket: bucket }));
+      console.log(`[S3] Floci bucket "${bucket}" already exists`);
+    } catch (headError) {
+      try {
+        await client.send(new CreateBucketCommand({ Bucket: bucket }));
+        console.log(`[S3] Floci bucket "${bucket}" was missing - created it`);
+      } catch (createError) {
+        // A concurrent process/request created it between our HeadBucket and
+        // CreateBucket calls - the bucket exists either way, not a failure.
+        if (
+          createError.name === "BucketAlreadyOwnedByYou" ||
+          createError.name === "BucketAlreadyExists"
+        ) {
+          console.log(`[S3] Floci bucket "${bucket}" already exists (created concurrently)`);
+        } else {
+          console.error(
+            `[S3] Failed to create Floci bucket "${bucket}": ${createError.name || "Error"}: ${createError.message}`
+          );
+        }
+      }
+    }
+  }
+}
+
 let readyPromise = null;
 
 function ensureS3ProviderReady() {
@@ -147,11 +193,13 @@ function ensureS3ProviderReady() {
     }
     if (S3_MODE === "floci") {
       console.log("[S3] Mode: floci — using Floci S3");
+      await ensureFlociBucketsExist();
       return "floci";
     }
     // auto
     console.log("[S3] Mode: auto");
     const awsHealthy = await checkAwsAvailable();
+    if (!awsHealthy) await ensureFlociBucketsExist();
     return awsHealthy ? "aws" : "floci";
   })();
 

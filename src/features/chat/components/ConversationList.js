@@ -114,8 +114,15 @@ const ConversationList = ({ currentUserProfileId }) => {
         }
 
         const propertyTitle = conv.property?.title;
-        const propertyImage = conv.property?.images?.[0]
-          ? `/pictures/${conv.property.images[0]}`
+        // Same rule as PropertyCard.js/PropertyDetailPage.js: only a bundled-
+        // static filename needs the /pictures/ prefix - a real upload's
+        // image is already an absolute S3/Floci URL, and prepending it
+        // unconditionally produced a malformed, unloadable URL here.
+        const firstConvImage = conv.property?.images?.[0];
+        const propertyImage = firstConvImage
+          ? (firstConvImage.startsWith("http://") || firstConvImage.startsWith("https://")
+              ? firstConvImage
+              : `/pictures/${firstConvImage}`)
           : null;
         const propertyId = conv.property?._id;
         const unreadCount = unreadCounts[conv._id] || 0;

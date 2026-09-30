@@ -80,18 +80,25 @@ const formatDisplayPrice = (price, listingType) => {
 };
  
 const displayText = (value, fallback = "N/A") => value || fallback;
- 
-const formatFeatureText = (value, t) => {
-  if (value === true || value === "yes" || value === "clear") return "Yes";
-  if (value === false || value === "no") return "No";
-  if (Array.isArray(value))
-    return value.length > 0
-      ? value.map((v) => v.charAt(0).toUpperCase() + v.slice(1)).join(", ")
-      : "None";
-  if (typeof value === "string" && value) {
-    return value.charAt(0).toUpperCase() + value.slice(1);
-  }
-  return value ?? "N/A";
+
+// Translates a raw backend enum value (e.g. property.propertyType,
+// bangladeshDetails.waterSource) through i18n for DISPLAY ONLY - the raw
+// value itself, read elsewhere in this file and sent back on any edit, is
+// never touched. `keyPrefix` namespaces the i18n key per field (e.g.
+// "water_supply_wasa") so two different enums that happen to share a raw
+// value (several bangladeshDetails fields allow "none") never collide on one
+// shared translation. Returns null for a missing value or the bare "none"
+// option - matching this page's existing English behavior of simply
+// omitting that detail row rather than showing a negative "None" (see
+// DetailListItem's `!secondary` check below), identically in both
+// languages. An unrecognized raw value still displays safely - capitalized,
+// underscores turned to spaces - instead of disappearing.
+const translateEnumValue = (value, keyPrefix, t) => {
+  if (value === null || value === undefined || value === "" || value === "none") return null;
+  if (typeof value !== "string") return null;
+  const readableFallback = value.charAt(0).toUpperCase() + value.slice(1).replace(/_/g, " ");
+  const key = keyPrefix ? `${keyPrefix}_${value}` : value;
+  return t(key, readableFallback);
 };
  
 const constructLocationString = (property) => {
@@ -125,8 +132,7 @@ const getLocationAccuracyInfo = (accuracy) => {
 };
  
 const DetailListItem = ({ icon, primary, secondary }) => {
-  if (!secondary || secondary === "N/A" || secondary === "No" || secondary === "None")
-    return null;
+  if (!secondary) return null;
   return (
     <ListItem disablePadding sx={{ pb: 0.5 }}>
       <ListItemIcon sx={{ minWidth: 36, color: "primary.main" }}>{icon}</ListItemIcon>
@@ -568,12 +574,12 @@ const PropertyDetailPage = () => {
                 <Grid item xs={6} sm={6}>
                   <Box sx={{ display: "flex", alignItems: "center", gap: 0.75 }}>
                     <HomeWorkIcon color="action" fontSize="small" />
-                    <Typography variant="body1" fontWeight="500">{formatFeatureText(property.propertyType)}</Typography>
+                    <Typography variant="body1" fontWeight="500">{translateEnumValue(property.propertyType, "", t) || t("not_available", "N/A")}</Typography>
                   </Box>
                 </Grid>
               </Grid>
               <Box sx={{ display: "flex", gap: 1, alignItems: "center", flexWrap: "wrap", mb: { xs: 2, md: 2.5 } }}>
-                <Chip label={formatFeatureText(property.listingType || property.mode)} size="small" color="primary" variant="filled" sx={{ fontWeight: "medium", borderRadius: "8px" }} />
+                <Chip label={translateEnumValue(property.listingType || property.mode, "", t) || t("not_available", "N/A")} size="small" color="primary" variant="filled" sx={{ fontWeight: "medium", borderRadius: "8px" }} />
                 <Chip icon={statusChipIcon} label={statusLabel} size="small" color={statusChipColor} variant="outlined" sx={{ fontWeight: "medium", borderRadius: "8px" }} />
               </Box>
               {property.createdBy && (
@@ -737,7 +743,7 @@ const PropertyDetailPage = () => {
           </Typography>
           <List dense>
             {!isLandOrCommercial && features.furnished !== "no" && (
-              <DetailListItem icon={<DeckIcon fontSize="small" />} primary={t("furnished_status", "Furnished Status")} secondary={formatFeatureText(features.furnished)} />
+              <DetailListItem icon={<DeckIcon fontSize="small" />} primary={t("furnished_status", "Furnished Status")} secondary={translateEnumValue(features.furnished, "furnished", t)} />
             )}
             {features.parking && !isLandOrCommercial && (
               <DetailListItem icon={<HomeWorkIcon fontSize="small" />} primary={t("parking_available", "Parking")} secondary={t("yes", "Yes")} />
@@ -760,11 +766,16 @@ const PropertyDetailPage = () => {
           </Typography>
           <List dense>
             <DetailListItem icon={accuracyInfo.icon} primary={t("location_accuracy_label", "Location Accuracy")} secondary={t(`location_accuracy_${accuracyInfo.text}_full`, `${locationAccuracy.charAt(0).toUpperCase() + locationAccuracy.slice(1)} Location`)} />
-            <DetailListItem icon={<BuildIcon fontSize="small" />} primary={t("property_condition", "Property Condition")} secondary={formatFeatureText(bdDetails.propertyCondition)} />
-            <DetailListItem icon={<GavelIcon fontSize="small" />} primary={t("legal_status", "Legal Status")} secondary={formatFeatureText(bdDetails.legalStatus)} />
-            <DetailListItem icon={<WaterIcon fontSize="small" />} primary={t("water_supply", "Water Supply")} secondary={formatFeatureText(bdDetails.waterSupply)} />
-            <DetailListItem icon={<GasMeterIcon fontSize="small" />} primary={t("gas_supply", "Gas Supply")} secondary={formatFeatureText(bdDetails.gasSupply)} />
-            <DetailListItem icon={<BoltIcon fontSize="small" />} primary={t("electricity_supply", "Electricity")} secondary={formatFeatureText(bdDetails.electricity)} />
+            <DetailListItem icon={<BuildIcon fontSize="small" />} primary={t("property_condition", "Property Condition")} secondary={translateEnumValue(bdDetails.propertyCondition, "property_condition", t)} />
+            {/* legalStatus/waterSupply/gasSupply/electricity aren't real
+                bangladeshDetails schema fields (see server/models/property.js) -
+                these were always reading undefined. Corrected to the actual
+                fields (ownershipPapers/waterSource/gasSource/backupPower) so
+                real submitted data displays instead of always being hidden. */}
+            <DetailListItem icon={<GavelIcon fontSize="small" />} primary={t("legal_status", "Legal Status")} secondary={translateEnumValue(bdDetails.ownershipPapers, "legal_status", t)} />
+            <DetailListItem icon={<WaterIcon fontSize="small" />} primary={t("water_supply", "Water Supply")} secondary={translateEnumValue(bdDetails.waterSource, "water_supply", t)} />
+            <DetailListItem icon={<GasMeterIcon fontSize="small" />} primary={t("gas_supply", "Gas Supply")} secondary={translateEnumValue(bdDetails.gasSource, "gas_supply", t)} />
+            <DetailListItem icon={<BoltIcon fontSize="small" />} primary={t("electricity_supply", "Electricity")} secondary={translateEnumValue(bdDetails.backupPower, "electricity", t)} />
           </List>
         </TabPanel>
       </Paper>

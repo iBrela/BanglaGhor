@@ -20,6 +20,21 @@
     />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#000000" />
+    <!--
+      DM Sans (used app-wide, see src/App.css's font-family) - loaded as a
+      real <link>, not an `@import` inside App.css. That `@import` used to
+      trigger the browser's "@import rules can't be after other rules"
+      warning, because App.css loads after src/styles/global.css in the
+      bundle, so its @import was never first in the final cascade - the
+      exact case CSS forbids. A <link> in <head> has no such ordering
+      requirement.
+    -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
     <meta
       name="description"
       content="BanglaGhor - Find your next home in Bangladesh"

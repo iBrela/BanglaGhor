@@ -157,11 +157,20 @@ const PropertyInfoPanel = ({
     return null;
   }
 
+  // Same image-resolution rule as PropertyCard.js/PropertyDetailPage.js: a
+  // real upload's image is already an absolute S3/Floci URL - only a
+  // bundled-static filename needs the /pictures/ prefix. Prepending it
+  // unconditionally produced a malformed URL for every real uploaded
+  // property here, which silently fell back to the placeholder via
+  // handleImageError below - the property's own stored image never
+  // actually changed, only this panel's broken rendering of it.
   const placeholderImg = `/pictures/placeholder.png`;
-  const imgSrc =
-    Array.isArray(selectedProperty.images) && selectedProperty.images.length > 0
-      ? `/pictures/${selectedProperty.images[0]}`
-      : placeholderImg;
+  const firstImage = Array.isArray(selectedProperty.images) ? selectedProperty.images[0] : null;
+  const imgSrc = firstImage
+    ? (firstImage.startsWith("http://") || firstImage.startsWith("https://")
+        ? firstImage
+        : `/pictures/${firstImage}`)
+    : placeholderImg;
   
   const locationString = constructLocationString(selectedProperty);
   
