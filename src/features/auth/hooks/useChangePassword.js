@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
-import { useAuth } from "../../../context/AuthContext";
+import { useAuth, getSafeAuthErrorMessage } from "../../../context/AuthContext";
 import { CognitoUser, AuthenticationDetails } from "amazon-cognito-identity-js";
 import { userPool } from "../../../aws/CognitoConfig";
 
@@ -205,10 +205,13 @@ const useChangePassword = () => {
           );
         });
       } catch (err) {
-        console.error("Change password error:", err.code || err.message);
-        const message =
-          err.message || "Failed to change password. Please try again.";
-        setError(message);
+        console.error("Change password error:", err?.code || err?.name, err);
+        setError(
+          getSafeAuthErrorMessage(
+            err,
+            "Failed to change password. Please try again."
+          )
+        );
       } finally {
         setIsSubmitting(false);
       }

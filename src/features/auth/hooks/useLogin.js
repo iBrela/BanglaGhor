@@ -1,6 +1,6 @@
 import { useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { useAuth } from "../../../context/AuthContext";
+import { useAuth, getSafeAuthErrorMessage } from "../../../context/AuthContext";
 
 /**
  * @hook useLogin
@@ -58,7 +58,10 @@ const useLogin = () => {
           navigate("/");
         }, 1500);
       } catch (err) {
-        console.error("Login error:", err);
+        // Dev-only diagnostic - err.code/err.name are always the real
+        // Cognito exception type, never sensitive (no password/token is
+        // ever part of this error object).
+        console.error("Login error:", err?.code || err?.name, err);
 
         if (err.message === "New password required.") {
           // Pass only the (non-sensitive) email through React Router's
@@ -70,20 +73,26 @@ const useLogin = () => {
           return;
         }
 
-        const message =
-          err.message ||
-          "Login failed. Please check your credentials and try again.";
+        // Branch on err.code/err.name (the real Cognito exception type),
+        // not err.message - Cognito error messages don't reliably contain
+        // the exception name as a substring, and some Cognito errors (e.g.
+        // ResourceNotFoundException) have no usable message at all.
+        const errorCode = err?.code || err?.name || "";
+        const safeMessage = getSafeAuthErrorMessage(
+          err,
+          "Unable to sign in. Please check your account details and try again."
+        );
 
-        if (message.includes("UserNotFoundException")) {
+        if (errorCode === "UserNotFoundException") {
           setError("No account found with this email.");
-        } else if (message.includes("NotAuthorizedException")) {
+        } else if (errorCode === "NotAuthorizedException") {
           setError("Incorrect email or password.");
-        } else if (message.includes("UserNotConfirmedException")) {
+        } else if (errorCode === "UserNotConfirmedException") {
           setError(
             "Account not verified. Please check your email for verification instructions or sign up again."
           );
         } else {
-          setError(message);
+          setError(safeMessage);
         }
       } finally {
         // Only set isSubmitting to false if we haven't navigated to change password

@@ -16,6 +16,29 @@ import { userPool } from "../aws/CognitoConfig";
 const API_BASE_URL =
   process.env.REACT_APP_API_URL || "http://localhost:5001/api";
 
+// Cognito (amazon-cognito-identity-js) sometimes constructs its JS Error
+// from a raw AWS response that has no `message` field at all - e.g. a
+// ResourceNotFoundException response body is just `{"__type":
+// "ResourceNotFoundException"}`, no message - and `new Error(undefined ||
+// null)` ends up with `.message` literally equal to the STRING "null"
+// (Error's constructor coerces its argument via String(), and
+// String(null) === "null"). That string is truthy, so a plain
+// `err.message || fallback` never catches it - confirmed directly against
+// the real Cognito endpoint during development, not assumed. This treats
+// any message that's missing, empty, or literally "null"/"undefined" (after
+// trimming, case-insensitive) as unusable, falling back to `fallback`
+// instead. `err.code`/`err.name` (the real Cognito exception type, e.g.
+// "NotAuthorizedException") are a SEPARATE, always-reliable field this
+// does NOT touch - callers that need to branch on exception type (see
+// useLogin.js) should keep reading err.code/err.name directly, not this
+// function's return value.
+export function getSafeAuthErrorMessage(err, fallback) {
+  const raw = typeof err?.message === "string" ? err.message.trim() : "";
+  const normalized = raw.toLowerCase();
+  if (raw && normalized !== "null" && normalized !== "undefined") return raw;
+  return fallback;
+}
+
 const AuthContext = createContext();
 
 export const useAuth = () => useContext(AuthContext);
@@ -179,7 +202,8 @@ export const AuthProvider = ({ children }) => {
 
           userCognito.getUserAttributes(async (err, attributes) => {
             if (err) {
-              setError(err.message);
+              console.error("Cognito getUserAttributes failure:", err.code || err.name, err);
+              setError(getSafeAuthErrorMessage(err, "Login failed"));
               setIdToken(null);
               reject(err);
               return;
@@ -200,8 +224,11 @@ export const AuthProvider = ({ children }) => {
           });
         },
         onFailure: (err) => {
-          console.error("Cognito login failure:", err);
-          setError(err.message || "Login failed");
+          // Dev-only diagnostic - err.code/err.name are always the real
+          // Cognito exception type (e.g. "ResourceNotFoundException"), never
+          // sensitive (no password/token is ever part of this error object).
+          console.error("Cognito login failure:", err.code || err.name, err);
+          setError(getSafeAuthErrorMessage(err, "Login failed"));
           setIsLoggedIn(false);
           setUser(null);
           setIdToken(null);
@@ -235,7 +262,8 @@ export const AuthProvider = ({ children }) => {
         null,
         (err, result) => {
           if (err) {
-            setError(err.message || "Signup failed");
+            console.error("Cognito signup failure:", err.code || err.name, err);
+            setError(getSafeAuthErrorMessage(err, "Signup failed"));
             reject(err);
             return;
           }
