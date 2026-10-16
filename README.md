@@ -58,24 +58,26 @@ git lfs ls-files
 
 ### 3. Serve the file locally
 
-The frontend expects the map tiles to be served from `http://localhost:8080/bangladesh.pmtiles`. Serve the directory with a simple local HTTP server:
+The frontend expects the map tiles to be served from `http://localhost:8082/bangladesh.pmtiles`. Port 8082 is this project's fixed local dev port for the PMTiles server - ports 8080 and 8081 are commonly already bound by other local services on a dev machine (e.g. Docker containers from unrelated projects), which silently breaks the basemap if the server can't actually bind there. Serve the directory with a simple local HTTP server:
 
 **Windows:**
 ```bat
 cd map-build\data
-python -m http.server 8080
+python -m http.server 8082
 ```
 
 **macOS/Linux:**
 ```bash
 cd map-build/data
-python3 -m http.server 8080
+python3 -m http.server 8082
 ```
+
+(Equivalently: `npx serve map-build/data --cors -l 8082`.)
 
 Leave that server running, then verify it in a browser or with curl:
 
 ```
-http://localhost:8080/bangladesh.pmtiles
+http://localhost:8082/bangladesh.pmtiles
 ```
 
 ### 4. Configure the frontend
@@ -83,7 +85,7 @@ http://localhost:8080/bangladesh.pmtiles
 In your `.env` file (copied from `.env.example`, never committed), make sure this points at your local server:
 
 ```
-REACT_APP_PMTILES_URL=http://localhost:8080/bangladesh.pmtiles
+REACT_APP_PMTILES_URL=http://localhost:8082/bangladesh.pmtiles
 ```
 
-This is already the default `mapBasemapStyle.js` falls back to if the variable is unset, so for local development you typically don't need to set it explicitly - only override it if you're pointing at a different host (e.g. a hosted/CDN copy for a deployed environment).
+`mapBasemapStyle.js`'s own fallback (if this variable is unset) is still `http://localhost:8080/bangladesh.pmtiles` - set this explicitly to port 8082 for local development so the frontend and the local server always agree on the port.
