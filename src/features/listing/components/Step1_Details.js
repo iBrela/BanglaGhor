@@ -15,9 +15,6 @@ import { useTranslation } from "react-i18next";
 const Step1_Details = ({ formData, errors, handleChange }) => {
   const { t } = useTranslation();
 
-  const showBedBath =
-    formData.propertyType !== "land" && formData.propertyType !== "commercial";
-
   return (
     <Box>
       {/* <Typography variant="h6" gutterBottom>
@@ -136,48 +133,6 @@ const Step1_Details = ({ formData, errors, handleChange }) => {
           />
           {/* Consider adding a unit selector if area can be in Katha etc. for Land type */}
         </Grid>
-
-        {/* Bedrooms - Conditional */}
-        {showBedBath && (
-          <Grid item xs={12} sm={6}>
-            <TextField
-              required // Required only when shown
-              id="bedrooms"
-              name="bedrooms"
-              label={t("bedrooms")}
-              type="number"
-              fullWidth
-              variant="outlined"
-              value={formData.bedrooms}
-              onChange={handleChange}
-              error={!!errors.bedrooms}
-              helperText={errors.bedrooms}
-              InputProps={{ inputProps: { min: 0 } }} // Allow 0 or more
-            />
-          </Grid>
-        )}
-
-        {/* Bathrooms - Conditional */}
-        {showBedBath && (
-          <Grid item xs={12} sm={6}>
-            <TextField
-              required // Required only when shown
-              id="bathrooms"
-              name="bathrooms"
-              label={t("bathrooms")}
-              type="number"
-              fullWidth
-              variant="outlined"
-              value={formData.bathrooms}
-              onChange={handleChange}
-              error={!!errors.bathrooms}
-              helperText={errors.bathrooms}
-              InputProps={{ inputProps: { min: 0 } }} // Allow 0 or more
-            />
-          </Grid>
-        )}
-
-        {/* Description and AI Button Removed from here */}
       </Grid>
     </Box>
   );

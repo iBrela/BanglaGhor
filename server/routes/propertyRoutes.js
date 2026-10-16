@@ -132,21 +132,46 @@ router.post(
       .isIn(["dedicated", "street", "garage", "none"]) 
       .withMessage("Invalid parking type option."),
 
+    // Only required for property types that actually have building
+    // utilities (not land/commercial) - matches the frontend's own
+    // needsBuildingSpecifics gate (see useListingForm.js/
+    // Step3_PropertyDetails.js). Previously these were unconditionally
+    // .notEmpty() for every property type, which meant a land/commercial
+    // listing (the frontend never requires these for that type) could fail
+    // this validator - a real pre-existing gating inconsistency, now fixed.
     body("bangladeshDetails.propertyCondition")
-      .notEmpty()
-      .withMessage("Property condition is required.") 
-      .isIn(["new", "under_construction", "resale"]) 
+      .optional({ checkFalsy: true })
+      .isIn(["new", "under_construction", "resale"])
       .withMessage("Invalid property condition."),
+    body("bangladeshDetails.propertyCondition").custom((value, { req }) => {
+      const isLandOrCommercial = ["land", "commercial"].includes(req.body.propertyType);
+      if (!isLandOrCommercial && !value) {
+        throw new Error("Property condition is required for this property type.");
+      }
+      return true;
+    }),
     body("bangladeshDetails.waterSource")
-      .notEmpty()
-      .withMessage("Water source is required.") 
-      .isIn(["wasa", "deep_tube_well", "both", "other"]) 
+      .optional({ checkFalsy: true })
+      .isIn(["wasa", "deep_tube_well", "both", "other"])
       .withMessage("Invalid water source."),
+    body("bangladeshDetails.waterSource").custom((value, { req }) => {
+      const isLandOrCommercial = ["land", "commercial"].includes(req.body.propertyType);
+      if (!isLandOrCommercial && !value) {
+        throw new Error("Water source is required for this property type.");
+      }
+      return true;
+    }),
     body("bangladeshDetails.gasSource")
-      .notEmpty()
-      .withMessage("Gas source is required.") 
-      .isIn(["piped", "cylinder", "none"]) 
+      .optional({ checkFalsy: true })
+      .isIn(["piped", "cylinder", "none"])
       .withMessage("Invalid gas source."),
+    body("bangladeshDetails.gasSource").custom((value, { req }) => {
+      const isLandOrCommercial = ["land", "commercial"].includes(req.body.propertyType);
+      if (!isLandOrCommercial && !value) {
+        throw new Error("Gas source is required for this property type.");
+      }
+      return true;
+    }),
     body("bangladeshDetails.gasLineInstalled")
       .optional() 
       .isIn(["yes", "no", "na"]) 
@@ -272,8 +297,33 @@ router.put(
 );
 
 
+// ============================================================================
+// "Enhance with AI" (Phase 2 listing-flow improvement) - seller-triggered,
+// pre-submission only. Never creates/modifies a Property document, so this
+// deliberately doesn't need fetchUserProfileMiddleware/approval checks -
+// just an authenticated user, to keep the AI call from being publicly
+// abusable. Description length capped to keep prompt size/AI usage bounded.
+// ============================================================================
 router.post(
-  "/upload-image", 
+  "/enhance-description",
+  authMiddleware,
+  [
+    // Blank is valid input here (generates a fresh grounded description
+    // from confirmed listing data instead of merging with seller text -
+    // see propertyDescriptionService.enhanceOrGenerateDescription).
+    body("description")
+      .trim()
+      .optional({ checkFalsy: true })
+      .isLength({ max: 4000 })
+      .withMessage("Description must be at most 4000 characters."),
+    body("lang").optional().isIn(["en", "bn"]).withMessage("Invalid language."),
+  ],
+  handleValidationErrors,
+  propertyController.enhanceDescription
+);
+
+router.post(
+  "/upload-image",
   authMiddleware,
   fetchUserProfileMiddleware,
   checkListingApprovalMiddleware,

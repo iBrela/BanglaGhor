@@ -22,16 +22,14 @@ import InfoIcon from "@mui/icons-material/Info";
 import LocationOnIcon from "@mui/icons-material/LocationOn"; 
 import ListAltIcon from "@mui/icons-material/ListAlt"; 
 import DescriptionIcon from "@mui/icons-material/Description"; 
-import PhotoLibraryIcon from "@mui/icons-material/PhotoLibrary"; 
-import CheckCircleOutlineIcon from "@mui/icons-material/CheckCircleOutline"; 
-import ArticleIcon from "@mui/icons-material/Article"; 
+import PhotoLibraryIcon from "@mui/icons-material/PhotoLibrary";
+import CheckCircleOutlineIcon from "@mui/icons-material/CheckCircleOutline";
 
 
 import useListingForm from "./hooks/useListingForm";
 import Step1Details from "./components/Step1_Details";
 import Step2Location from "./components/Step2_Location";
-import Step3Features from "./components/Step3_Features";
-import StepBangladeshDetails from "./components/Step_Bangladesh_Details";
+import Step3PropertyDetails from "./components/Step3_PropertyDetails";
 import Step4Images from "./components/Step4_Images";
 import StepDescription from "./components/Step_Description";
 import Step5Review from "./components/Step5_Review";
@@ -77,20 +75,23 @@ const ListPropertyPage = () => {
     steps,
     formData,
     features,
-    imageUrls, 
-    imageUploadStates, 
+    imageUrls,
+    imageUploadStates,
     handleImageFileSelected,
     removeImageByUrl,
     errors,
     loadingSubmit,
     snackbar,
     handleChange,
+    handleAddressTextChange,
+    handleAddressSelect,
     handleFeatureChange,
     handleNext,
     handleBack,
     handleSubmit,
     handleCloseSnackbar,
-    
+    enhancingDescription,
+    handleEnhanceDescription,
   } = useListingForm();
 
   const currentStepLabel =
@@ -102,13 +103,12 @@ const ListPropertyPage = () => {
   );
 
   const stepIcons = [
-    InfoIcon, 
-    LocationOnIcon, 
-    ListAltIcon, 
-    ArticleIcon, 
-    PhotoLibraryIcon, 
-    DescriptionIcon, 
-    CheckCircleOutlineIcon, 
+    InfoIcon,
+    LocationOnIcon,
+    ListAltIcon,
+    DescriptionIcon,
+    PhotoLibraryIcon,
+    CheckCircleOutlineIcon,
   ];
   const CurrentStepIcon = stepIcons[activeStep] || InfoIcon;
 
@@ -123,16 +123,6 @@ const ListPropertyPage = () => {
 
   
   const getStepContent = (step) => {
-    const isLandOrCommercial =
-      formData.propertyType === "land" ||
-      formData.propertyType === "commercial";
-    if (step === 2 && isLandOrCommercial) {
-      console.warn("Attempted to render Features step for land/commercial.");
-      return (
-        <Typography>Features not applicable for this property type.</Typography>
-      );
-    }
-
     switch (step) {
       case 0: // Basic Info
         return (
@@ -148,64 +138,47 @@ const ListPropertyPage = () => {
             formData={formData}
             errors={errors}
             handleChange={handleChange}
+            onAddressTextChange={handleAddressTextChange}
+            onAddressSelect={handleAddressSelect}
           />
         );
-      case 2: // Features (Standard)
+      case 2: // Property Details (bedrooms/bathrooms, standard features, and
+        // the genuinely-used Bangladesh-specific fields, consolidated)
         return (
-          <Step3Features
+          <Step3PropertyDetails
+            formData={formData}
+            errors={errors}
             features={features}
-            handleFeatureChange={handleFeatureChange}
-            formData={formData}
-          />
-        );
-      case 3: // Specific Details (BD Context)
-        return (
-          <StepBangladeshDetails
-            formData={formData}
-            errors={errors.bangladeshDetails || {}}
             handleChange={handleChange}
+            handleFeatureChange={handleFeatureChange}
           />
         );
-      case 4: // Upload Photos
-        console.log(
-          "[ListPropertyPage/getStepContent] For Step 4 - imageUrls being passed:",
-          imageUrls
-        );
-        console.log(
-          "[ListPropertyPage/getStepContent] For Step 4 - imageUploadStates being passed:",
-          imageUploadStates
-        );
-        console.log(
-          "[ListPropertyPage/getStepContent] For Step 4 - typeof handleImageFileSelected:",
-          typeof handleImageFileSelected
-        );
-        console.log(
-          "[ListPropertyPage/getStepContent] For Step 4 - typeof removeImageByUrl:",
-          typeof removeImageByUrl
-        );
-        return (
-          <Step4Images
-            imageUrls={imageUrls} 
-            imageUploadStates={imageUploadStates} 
-            handleImageFileSelected={handleImageFileSelected} 
-            removeImageByUrl={removeImageByUrl} 
-            errors={errors} 
-          />
-        );
-      case 5: // Description
+      case 3: // Description & Features
         return (
           <StepDescription
             formData={formData}
             errors={errors}
             handleChange={handleChange}
+            onEnhanceDescription={handleEnhanceDescription}
+            enhancingDescription={enhancingDescription}
           />
         );
-      case 6: // Review
+      case 4: // Photos
+        return (
+          <Step4Images
+            imageUrls={imageUrls}
+            imageUploadStates={imageUploadStates}
+            handleImageFileSelected={handleImageFileSelected}
+            removeImageByUrl={removeImageByUrl}
+            errors={errors}
+          />
+        );
+      case 5: // Review & Publish
         return (
           <Step5Review
             formData={formData}
             features={features}
-            images={imageUrls} 
+            images={imageUrls}
           />
         );
       default:
@@ -252,10 +225,16 @@ const ListPropertyPage = () => {
               component="div"
               sx={{
                 fontWeight: 600,
-                color: "#2C3E50", 
+                color: "#2C3E50",
               }}
             >
               {currentStepTitle}
+            </Typography>
+            <Typography variant="caption" color="text.secondary">
+              {t("step_progress", "Step {{current}} of {{total}}", {
+                current: activeStep + 1,
+                total: steps.length,
+              })}
             </Typography>
           </Box>
         ) : (
@@ -285,7 +264,7 @@ const ListPropertyPage = () => {
         >
           {/* Back Button */}
           <Button
-            disabled={activeStep === 0 || loadingSubmit}
+            disabled={activeStep === 0 || loadingSubmit || enhancingDescription}
             onClick={handleBack}
             variant="outlined"
             color="primary"
@@ -298,8 +277,8 @@ const ListPropertyPage = () => {
           <Button
             variant="outlined"
             color="error"
-            onClick={() => setCancelConfirmOpen(true)} 
-            disabled={loadingSubmit}
+            onClick={() => setCancelConfirmOpen(true)}
+            disabled={loadingSubmit || enhancingDescription}
             sx={{ borderRadius: "8px", textTransform: "none", mx: 2 }}
           >
             {t("cancel_listing", "Cancel Listing")}
@@ -309,13 +288,13 @@ const ListPropertyPage = () => {
           <StyledButton
             variant="contained"
             color="primary"
-            disabled={loadingSubmit}
+            disabled={loadingSubmit || enhancingDescription}
             onClick={
               activeStep === steps.length - 1 ? handleSubmit : handleNext
             }
-            sx={{ ml: "auto" }} 
+            sx={{ ml: "auto" }}
           >
-            {loadingSubmit ? (
+            {loadingSubmit || enhancingDescription ? (
               <CircularProgress size={24} color="inherit" />
             ) : activeStep === steps.length - 1 ? (
               t("submit_property")

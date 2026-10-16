@@ -1,8 +1,16 @@
 import React from "react";
-import { Grid, TextField, Box } from "@mui/material";
+import { Grid, TextField, Box, Typography } from "@mui/material";
 import { useTranslation } from "react-i18next";
+import AddressAutocomplete from "./AddressAutocomplete";
+import LocationMapPreview from "./LocationMapPreview";
 
-const Step2_Location = ({ formData, errors, handleChange }) => {
+const Step2_Location = ({
+  formData,
+  errors,
+  handleChange,
+  onAddressTextChange,
+  onAddressSelect,
+}) => {
   const { t } = useTranslation();
 
   return (
@@ -11,28 +19,22 @@ const Step2_Location = ({ formData, errors, handleChange }) => {
         {t("step_location", "Location Details")}
       </Typography> */}
       <Grid container spacing={3}>
-        {/* Address Line 1 (House/Road/Village/Area) */}
+        {/* Address Line 1 (House/Road/Village/Area) - Google Maps-style
+            autocomplete, backed by the existing /api/locations/search
+            (Photon) endpoint. Typing without ever picking a suggestion is
+            always accepted (freeSolo) - see AddressAutocomplete.js. */}
         <Grid item xs={12}>
-          <TextField
+          <AddressAutocomplete
             required
-            id="addressLine1"
-            name="addressLine1"
             label={t(
               "address_line_1",
               "Address Line 1 (House/Road/Village/Area)"
             )}
-            fullWidth
-            variant="outlined"
             value={formData.addressLine1}
-            onChange={handleChange}
+            onTextChange={onAddressTextChange}
+            onSelect={onAddressSelect}
             error={!!errors.addressLine1}
-            helperText={
-              errors.addressLine1 ||
-              t(
-                "address_l1_helper",
-                "e.g., House 12, Road 5, Block C OR Vill: Rampur"
-              )
-            }
+            helperText={errors.addressLine1}
           />
         </Grid>
 
@@ -73,7 +75,10 @@ const Step2_Location = ({ formData, errors, handleChange }) => {
           />
         </Grid>
 
-        {/* Upazila / Thana */}
+        {/* Upazila / Thana - auto-filled only when the address-autocomplete
+            provider (Photon) returned a trustworthy, distinct value for it
+            (see locationService.js's normalizePhotonFeature); otherwise left
+            blank for manual entry, never guessed. */}
         <Grid item xs={12} sm={6}>
           <TextField
             required
@@ -85,7 +90,15 @@ const Step2_Location = ({ formData, errors, handleChange }) => {
             value={formData.upazila}
             onChange={handleChange}
             error={!!errors.upazila}
-            helperText={errors.upazila}
+            helperText={
+              errors.upazila ||
+              (!formData.upazila
+                ? t(
+                    "upazila_not_confirmed",
+                    "Upazila/Thana could not be confirmed automatically. Please enter it manually."
+                  )
+                : "")
+            }
           />
           {/* Consider Select dropdown if you have a list of upazilas per district */}
         </Grid>
@@ -124,8 +137,28 @@ const Step2_Location = ({ formData, errors, handleChange }) => {
           />
         </Grid>
 
-        {/* Removed State field */}
-        {/* Add Map integration here later if desired */}
+        {/* Map confirmation preview - only ever shown once the seller has
+            picked a real autocomplete suggestion (formData.latitude/
+            longitude are only ever set by handleAddressSelect in
+            useListingForm.js). A purely manually-typed address never shows
+            a marker here - there are no verified coordinates yet to show,
+            and showing one would misleadingly imply the location was
+            confirmed when it wasn't. */}
+        <Grid item xs={12}>
+          {formData.latitude != null && formData.longitude != null ? (
+            <LocationMapPreview
+              lat={formData.latitude}
+              lng={formData.longitude}
+            />
+          ) : (
+            <Typography variant="caption" color="text.secondary">
+              {t(
+                "location_not_confirmed",
+                "Pick a suggestion from the address search above to preview the exact location on the map. You can still enter your address manually without one."
+              )}
+            </Typography>
+          )}
+        </Grid>
       </Grid>
     </Box>
   );

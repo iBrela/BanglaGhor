@@ -186,127 +186,92 @@ const Step5_Review = ({ formData, features, images }) => {
             <Divider sx={{ my: 1 }} />
           </Grid>
 
-          {/* --- Section 2: Features & Specifics --- */}
-          {/* Standard Features (only if applicable) */}
-          {!isLandOrCommercial && (
-            <Grid item xs={12} md={6}>
-              <Typography
-                variant="subtitle1"
-                gutterBottom
-                sx={{ fontWeight: "bold" }}
-              >
-                {t("features", "Standard Features")}
-              </Typography>
-              <List dense disablePadding>
-                <ListItem disableGutters>
-                  <ListItemText
-                    primary={t("furnished", "Furnished Status")}
-                    secondary={formatValue(
-                      t(
-                        `furnished_${features.furnished || "no"}`,
-                        features.furnished || "no"
-                      ),
-                      t
-                    )}
-                  />
-                </ListItem>
-                {standardFeatureList.map(
-                  (f) =>
-                    features[f.key] && (
-                      <ListItem key={f.key} disableGutters>
-                        <ListItemText primary={t(f.labelKey, f.key)} />
-                      </ListItem>
-                    )
-                )}
-                {/* Check if any standard feature is true */}
-                {!Object.values(features).some(
-                  (v) => v === true || (typeof v === "string" && v !== "no")
-                ) && (
-                  <ListItem disableGutters>
-                    <ListItemText
-                      secondary={t(
-                        "no_features_selected",
-                        "No standard features selected."
-                      )}
-                    />
-                  </ListItem>
-                )}
-              </List>
-            </Grid>
-          )}
-
-          {/* Specific Bangladesh Details */}
+          {/* --- Section 2: Property Details (bedrooms/bathrooms, standard
+              features, and the Bangladesh-specific fields that actually
+              matter - matches the consolidated Step3_PropertyDetails.js) --- */}
           <Grid item xs={12} md={isLandOrCommercial ? 12 : 6}>
-            {" "}
-            {/* Take full width if features are hidden */}
             <Typography
               variant="subtitle1"
               gutterBottom
               sx={{ fontWeight: "bold" }}
             >
-              {t("specific_details", "Specific Details")}
+              {t("property_details", "Property Details")}
             </Typography>
             <List dense disablePadding>
-              {/* Display key BD details - add more as needed */}
-              <ListItem disableGutters>
-                <ListItemText
-                  primary={t("property_condition")}
-                  secondary={formatValue(
-                    t(
-                      `condition_${bdDetails.propertyCondition}`,
-                      bdDetails.propertyCondition
-                    ),
-                    t
-                  )}
-                />
-              </ListItem>
-              <ListItem disableGutters>
-                <ListItemText
-                  primary={t("water_source")}
-                  secondary={formatValue(
-                    t(`water_${bdDetails.waterSource}`, bdDetails.waterSource),
-                    t
-                  )}
-                />
-              </ListItem>
-              <ListItem disableGutters>
-                <ListItemText
-                  primary={t("gas_source")}
-                  secondary={formatValue(
-                    t(`gas_${bdDetails.gasSource}`, bdDetails.gasSource),
-                    t
-                  )}
-                />
-              </ListItem>
-              {bdDetails.gasSource === "piped" && (
-                <ListItem disableGutters>
-                  <ListItemText
-                    primary={t("gas_line_installed")}
-                    secondary={formatValue(bdDetails.gasLineInstalled, t)}
-                  />
-                </ListItem>
+              {!isLandOrCommercial && (
+                <>
+                  <ListItem disableGutters>
+                    <ListItemText
+                      primary={t("furnished", "Furnished Status")}
+                      secondary={formatValue(
+                        t(
+                          `furnished_${features.furnished || "no"}`,
+                          features.furnished || "no"
+                        ),
+                        t
+                      )}
+                    />
+                  </ListItem>
+                  {standardFeatureList
+                    .filter((f) => features[f.key])
+                    .map((f) => (
+                      <ListItem key={f.key} disableGutters>
+                        <ListItemText primary={t(f.labelKey, f.key)} />
+                      </ListItem>
+                    ))}
+                  <ListItem disableGutters>
+                    <ListItemText
+                      primary={t("property_condition")}
+                      secondary={formatValue(
+                        t(
+                          `condition_${bdDetails.propertyCondition}`,
+                          bdDetails.propertyCondition
+                        ),
+                        t
+                      )}
+                    />
+                  </ListItem>
+                  <ListItem disableGutters>
+                    <ListItemText
+                      primary={t("water_source")}
+                      secondary={formatValue(
+                        t(`water_${bdDetails.waterSource}`, bdDetails.waterSource),
+                        t
+                      )}
+                    />
+                  </ListItem>
+                  <ListItem disableGutters>
+                    <ListItemText
+                      primary={t("gas_source")}
+                      secondary={formatValue(
+                        t(`gas_${bdDetails.gasSource}`, bdDetails.gasSource),
+                        t
+                      )}
+                    />
+                  </ListItem>
+                  <ListItem disableGutters>
+                    <ListItemText
+                      primary={t("backup_power")}
+                      secondary={formatValue(
+                        t(`power_${bdDetails.backupPower}`, bdDetails.backupPower),
+                        t
+                      )}
+                    />
+                  </ListItem>
+                  <ListItem disableGutters>
+                    <ListItemText
+                      primary={t("balcony_available")}
+                      secondary={formatValue(bdDetails.balcony, t)}
+                    />
+                  </ListItem>
+                  <ListItem disableGutters>
+                    <ListItemText
+                      primary={t("rooftop_access")}
+                      secondary={formatValue(bdDetails.rooftopAccess, t)}
+                    />
+                  </ListItem>
+                </>
               )}
-              <ListItem disableGutters>
-                <ListItemText
-                  primary={t("backup_power")}
-                  secondary={formatValue(
-                    t(`power_${bdDetails.backupPower}`, bdDetails.backupPower),
-                    t
-                  )}
-                />
-              </ListItem>
-              <ListItem disableGutters>
-                <ListItemText
-                  primary={t("parking_type")}
-                  secondary={formatValue(
-                    t(
-                      `parking_${bdDetails.parkingType}`,
-                      bdDetails.parkingType
-                    ),
-                    t
-                  )}
-                />
-              </ListItem>
               <ListItem disableGutters>
                 <ListItemText
                   primary={t("security_features")}
@@ -320,7 +285,18 @@ const Step5_Review = ({ formData, features, images }) => {
                   }
                 />
               </ListItem>
-              {/* Add more key details here */}
+              <ListItem disableGutters>
+                <ListItemText
+                  primary={t("ownership_papers_clear")}
+                  secondary={formatValue(
+                    t(
+                      `papers_${bdDetails.ownershipPapers}`,
+                      bdDetails.ownershipPapers
+                    ),
+                    t
+                  )}
+                />
+              </ListItem>
             </List>
           </Grid>
 
@@ -328,14 +304,14 @@ const Step5_Review = ({ formData, features, images }) => {
             <Divider sx={{ my: 1 }} />
           </Grid>
 
-          {/* --- Section 3: Description & Images --- */}
+          {/* --- Section 3: Description & Features, Photos --- */}
           <Grid item xs={12} md={6}>
             <Typography
               variant="subtitle1"
               gutterBottom
               sx={{ fontWeight: "bold" }}
             >
-              {t("description", "Description")}
+              {t("description_and_features", "Description & Features")}
             </Typography>
             <Typography
               variant="body2"
@@ -357,7 +333,7 @@ const Step5_Review = ({ formData, features, images }) => {
               gutterBottom
               sx={{ fontWeight: "bold" }}
             >
-              {t("images", "Images")} ({imageNames.length})
+              {t("review_photos_heading", "Photos")} ({imageNames.length})
             </Typography>
             {imageNames.length > 0 ? (
               <List

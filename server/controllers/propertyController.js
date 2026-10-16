@@ -4,6 +4,7 @@ const axios = require("axios");
 const {
   buildBilingualDescription,
   buildFromManualDescription,
+  enhanceOrGenerateDescription,
 } = require("../services/propertyDescriptionService");
 const {
   PutObjectCommand,
@@ -59,6 +60,43 @@ const isValidBangladeshLocation = (lat, lng) => {
     lng >= BD_BOUNDS.minLng &&
     lng <= BD_BOUNDS.maxLng
   );
+};
+
+// Pure numeric/range validation ONLY - this is NOT an authentication or
+// trust boundary, and the name deliberately avoids implying one. It accepts
+// a coordinate pair exactly when both are real, finite numbers within
+// Bangladesh; it has no way to verify WHO submitted them or WHERE they
+// actually came from, the same as every other field in req.body. In
+// practice, only one place in the app ever populates these fields - the
+// address-autocomplete selection path (a seller picking a real
+// Photon-geocoded suggestion; see AddressAutocomplete.js /
+// useListingForm.js's handleAddressSelect) - but that's a property of the
+// FRONTEND's own form flow, not something this function checks or can rely
+// on. A submitted pair that merely happens to be valid is treated the same
+// way regardless of how it was produced - exactly like this app already
+// treats manually-typed address text (also never independently verified
+// before being geocoded). Returns null for every other case (fields absent,
+// non-numeric, NaN, outside Bangladesh), which callers treat exactly like
+// "no coordinates were provided" - i.e. they fall through to the existing
+// geocodeAddress()-from-text flow below, completely unchanged. This keeps
+// both create and update backward compatible: a request that never sends
+// latitude/longitude (every existing caller, and manual address entry)
+// behaves identically to before this function existed.
+const getValidSubmittedCoordinates = (body) => {
+  const lat = Number(body?.latitude);
+  const lng = Number(body?.longitude);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  if (!isValidBangladeshLocation(lat, lng)) return null;
+  return {
+    latitude: lat,
+    longitude: lng,
+    position: { lat, lng },
+    locationAccuracy: "precise",
+    geocodedAddress:
+      typeof body.geocodedAddress === "string" && body.geocodedAddress.trim()
+        ? body.geocodedAddress.trim()
+        : undefined,
+  };
 };
 
 const getDistrictCoordinates = (district) => {
@@ -346,7 +384,20 @@ exports.createProperty = async (req, res) => {
       postalCode: req.body.postalCode,
     };
 
-    const geocodeResult = await geocodeAddress(addressData);
+    // A valid, already-geocoded coordinate submitted with the request skips
+    // the OpenCage re-geocode entirely - in practice this only ever happens
+    // via the address-autocomplete selection path, where re-geocoding the
+    // resulting address TEXT would be both redundant (Photon already
+    // resolved a real point for this exact suggestion) and a real risk of
+    // landing somewhere slightly different from what the seller saw and
+    // picked.
+    const submittedCoordinates = getValidSubmittedCoordinates(req.body);
+    const geocodeResult =
+      submittedCoordinates ||
+      (await geocodeAddress(addressData));
+    if (submittedCoordinates && !submittedCoordinates.geocodedAddress) {
+      submittedCoordinates.geocodedAddress = constructGeocodingAddress(addressData);
+    }
 
     let propertyData = {
       ...req.body,
@@ -428,6 +479,69 @@ exports.createProperty = async (req, res) => {
         .json({ message: "Validation Error", errors: errors });
     }
     res.status(500).json({ error: "Server error creating property" });
+  }
+};
+
+// ============================================================================
+// "Enhance with AI" (seller-triggered, pre-submission) - takes the seller's
+// current draft description (which may be BLANK) plus whatever listing
+// fields they've entered so far and returns ONE description for them to
+// review/edit in the same textarea. Does NOT create or modify any Property
+// document - this only ever runs before submission, from the listing form
+// itself. See propertyDescriptionService.enhanceOrGenerateDescription for
+// the full merge-vs-generate branching and no-hallucination/preserve-
+// seller-facts rules.
+// ============================================================================
+exports.enhanceDescription = async (req, res) => {
+  try {
+    const sellerText = (req.body.description || "").trim();
+    const lang = req.body.lang === "bn" ? "bn" : "en";
+
+    const lat = Number(req.body.latitude);
+    const lng = Number(req.body.longitude);
+    const propertyLike = {
+      title: req.body.title,
+      propertyType: req.body.propertyType,
+      listingType: req.body.listingType,
+      price: req.body.price,
+      area: req.body.area,
+      bedrooms: req.body.bedrooms,
+      bathrooms: req.body.bathrooms,
+      addressLine1: req.body.addressLine1,
+      upazila: req.body.upazila,
+      cityTown: req.body.cityTown,
+      district: req.body.district,
+      latitude: lat,
+      longitude: lng,
+      // Only ever set via the address-autocomplete selection path on the
+      // frontend (see useListingForm.js's handleAddressSelect) - same
+      // "valid coordinates submitted = treat as precise" assumption
+      // createProperty's getValidSubmittedCoordinates makes.
+      locationAccuracy:
+        Number.isFinite(lat) && Number.isFinite(lng) ? "precise" : undefined,
+      features: req.body.features || {},
+      bangladeshDetails: req.body.bangladeshDetails || {},
+    };
+
+    const result = await enhanceOrGenerateDescription(sellerText, propertyLike, lang);
+    if (!result) {
+      // Only reachable when sellerText was non-blank and both AI providers
+      // failed (the blank/generate branch always resolves to a non-empty
+      // deterministic fallback at worst) - the seller's own text must be
+      // left completely untouched in that case.
+      return res.status(502).json({
+        message:
+          "AI enhancement is temporarily unavailable. Your description has not been changed.",
+      });
+    }
+
+    res.status(200).json({ description: result });
+  } catch (err) {
+    console.error("Enhance description error:", err.message);
+    res.status(502).json({
+      message:
+        "AI enhancement is temporarily unavailable. Your description has not been changed.",
+    });
   }
 };
 
@@ -678,19 +792,35 @@ exports.updateProperty = async (req, res) => {
         postalCode: req.body.postalCode || existingProperty.postalCode,
       };
 
+      // Same valid-submitted-coordinate short-circuit as createProperty() -
+      // only takes effect when the request actually included a real,
+      // in-Bangladesh lat/lng (the address-autocomplete selection path);
+      // every existing caller that only ever sent address text falls
+      // through to the unchanged re-geocode below exactly as before.
+      const submittedCoordinates = getValidSubmittedCoordinates(req.body);
+      if (submittedCoordinates && !submittedCoordinates.geocodedAddress) {
+        submittedCoordinates.geocodedAddress = constructGeocodingAddress(
+          addressDataForUpdate
+        );
+      }
+
       console.log(
-        "Address fields updated. Re-geocoding with:",
-        addressDataForUpdate
+        submittedCoordinates
+          ? "Address fields updated. Using submitted coordinates (already validated)."
+          : "Address fields updated. Re-geocoding with:",
+        submittedCoordinates || addressDataForUpdate
       );
 
-      let geocodeResult = null;
-      try {
-        geocodeResult = await geocodeAddress(addressDataForUpdate);
-      } catch (geocodeError) {
-        console.error(
-          "Error during geocoding for update:",
-          geocodeError.message
-        );
+      let geocodeResult = submittedCoordinates || null;
+      if (!geocodeResult) {
+        try {
+          geocodeResult = await geocodeAddress(addressDataForUpdate);
+        } catch (geocodeError) {
+          console.error(
+            "Error during geocoding for update:",
+            geocodeError.message
+          );
+        }
       }
 
       if (!geocodeResult) {

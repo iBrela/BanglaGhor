@@ -427,6 +427,32 @@ function normalizePhotonFeature(feature) {
       district: props.county || props.district || null,
       division: props.state || null,
     },
+    // Additive, optional fields for callers that need to pre-fill a
+    // structured address form (e.g. the property-listing address
+    // autocomplete) rather than just a map search label. Only ever the raw
+    // value Photon itself returned for this exact feature, or null - never
+    // fabricated/derived. Existing consumers (map search, home search) don't
+    // read these and are unaffected.
+    postcode: props.postcode || null,
+    street: props.street || null,
+    city: props.city || null,
+    // Additive: Photon returns this for some house/road-level results (not
+    // for area/place-level ones like a neighbourhood name) - raw passthrough
+    // only, null when absent. Never fabricated when missing.
+    houseNumber: props.housenumber || null,
+    // Additive: best-effort Upazila/Thana signal. Confirmed by live-testing
+    // real Dhaka/Chattogram/Khulna addresses - Bangladesh's Upazila/Thana
+    // tier doesn't map onto any single dedicated OSM/Photon admin field, but
+    // when props.district is present AND distinct from props.county (the
+    // field context.district above already uses for the app's "District"
+    // field), it reliably holds the thana-level neighbourhood name for
+    // address-level results (e.g. "Gulshan", "Dhanmondi", "Kolabagan" for
+    // Dhaka Metropolitan addresses - verified against Photon's live API).
+    // When district is absent, or equals county (no distinct info), this is
+    // null rather than guessed - callers must treat null as "Photon has no
+    // trustworthy Upazila/Thana for this result" and leave it for the seller
+    // to fill in manually, never fabricating a value.
+    upazila: props.district && props.district !== props.county ? props.district : null,
     provider: "photon",
   };
 }

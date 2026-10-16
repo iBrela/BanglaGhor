@@ -163,8 +163,10 @@ function detectLanguage(text) {
   return bengaliCount > latinCount ? "bn" : "en";
 }
 
-// ─── Generation prompt (shared by Groq and Gemini) ─────────────────────────
-function buildGenerationPrompt(property, nearbyHighlights) {
+// ─── Shared fact-gathering (used by both full-generation and the seller-text
+// enhancement prompt below) - only ever includes a fact when the field
+// actually has a value, never invents/defaults one. ──────────────────────────
+function buildFactLines(property) {
   const featureLines = [];
   const f = property.features || {};
   if (f.furnished && f.furnished !== "no")
@@ -184,6 +186,8 @@ function buildGenerationPrompt(property, nearbyHighlights) {
     ["waterSource", "Water source"],
     ["gasSource", "Gas source"],
     ["backupPower", "Backup power", (v) => v && v !== "none"],
+    ["propertyCondition", "Property condition"],
+    ["ownershipPapers", "Ownership papers", (v) => v && v !== "unknown"],
     ["nearbySchools", "Nearby schools"],
     ["nearbyHospitals", "Nearby hospitals"],
     ["nearbyMarkets", "Nearby markets"],
@@ -208,20 +212,53 @@ function buildGenerationPrompt(property, nearbyHighlights) {
     property.district,
   ].filter(Boolean);
 
+  return { featureLines, locationParts };
+}
+
+// Shared structure/length guidance for BOTH the full-generation prompt and
+// the enhancement prompt below - ensures the two code paths produce the
+// same quality/depth target. Added after live-testing against the real
+// Groq/Gemini APIs showed the enhancement prompt's old vague "concise,
+// 1-3 short paragraphs" guidance collapsed everything into one dense,
+// semicolon-packed ~70-word paragraph instead of the two well-organized
+// paragraphs a reader would expect.
+const DESCRIPTION_STRUCTURE_RULES = `- Write approximately TWO paragraphs, separated by a blank line (two newline characters) - natural flowing prose, never a comma/semicolon-separated list of facts strung into one run-on paragraph.
+- Paragraph 1: the property itself - type, size, bedrooms/bathrooms, condition, furnishing, and the other confirmed property features supplied below.
+- Paragraph 2: location, access, and nearby information - using only the location/road/light/nearby-place facts actually supplied below. If little or no such information is supplied, keep this paragraph short and factual, or fold the little that exists into paragraph 1 - never pad an empty-feeling second paragraph with filler.
+- Target length: approximately 140-220 words total. This is a guideline, not a strict rule - a listing with limited supplied information should produce a shorter, still fully factual description rather than being padded with generic sentences just to reach this length.`;
+
+// Shared, strict no-hallucination guidance - added to the generation prompt
+// after live-testing found it fabricating content ("growing infrastructure",
+// "capitalize on the expanding urban landscape", "ready to build - no
+// existing structures") for a sparse land listing with almost no supplied
+// fields, apparently padding to reach the length target above. This makes
+// explicit that a short, honest description always wins over a longer
+// invented one - the generation prompt previously only had a single weak
+// "no exaggerated claims" line with no sparse-data guidance at all.
+const DESCRIPTION_NO_HALLUCINATION_RULES = `- Never invent anything not present in the supplied facts below: no nearby facilities, distances, transport links, room counts, parking, furnishing, balcony, rooftop access, utilities, security, property condition, renovations, road width, natural light, views, investment potential, development opportunity, or neighbourhood claims that aren't actually supported by the data given.
+- Avoid unsupported marketing phrases such as "luxury", "premium", "prime location", "perfect investment", "walking distance", "excellent connectivity", or "ideal for families/professionals" unless the supplied facts genuinely justify that specific claim.
+- For land/plot listings specifically: do not describe it as a "blank canvas", "ready for development", "great investment opportunity", "capitalize on growth", "access to the city's/region's expanding infrastructure", "within local zoning regulations", or similar - these are unsupported investment/development/infrastructure claims unless the supplied data explicitly states zoning, permitted use, infrastructure access, or development plans. A sparse land listing with only type/price/size/location should simply state those facts plainly and stop - it does not need a closing sentence about the land's potential.
+- If only a little information is supplied, write a SHORT, fully factual description instead - even as few as 40-80 words is fine. A short truthful description is always better than a longer one padded with generic filler about development potential, future opportunity, growing infrastructure, or investment value.`;
+
+// ─── Generation prompt (shared by Groq and Gemini) ─────────────────────────
+function buildGenerationPrompt(property, nearbyHighlights) {
+  const { featureLines, locationParts } = buildFactLines(property);
+
   const isLandOrCommercial =
     property.propertyType === "land" || property.propertyType === "commercial";
 
   const nearbySection = formatNearbyHighlightsForPrompt(nearbyHighlights);
 
-  return `You are an expert real estate copywriter for a Bangladesh property portal. Write an attractive, detailed, professional property description - 2 to 3 well-written paragraphs - using ONLY the facts supplied below. This should read like a real listing a buyer/renter would want to read, not a generic template: highlight the property's strongest, most concrete advantages (space, features, condition, location) in natural, varied language.
+  return `You are an expert real estate copywriter for a Bangladesh property portal. Write an attractive, informative, professional property description using ONLY the facts supplied below. This should read like a real listing a buyer/renter would want to read, not a generic template: explain the property's concrete details (space, features, condition, location) in natural, varied language rather than a feature dump.
 
 Rules:
 - Identify property type and rent/sale status early on.
 - Summarize the location, preserving any Bangla-script place names exactly as given (do not translate them).
 ${isLandOrCommercial ? "" : "- Include bedrooms/bathrooms if present.\n"}- Include area if present, price naturally if present (not just a bare list - weave these into the prose).
 - Mention supplied features naturally (furnishing, parking, balcony, security, etc. when present).
-- No exaggerated or unverifiable marketing claims ("best in the city", "once in a lifetime", "stunning views" unless a view is actually in the supplied data).
-- Length: roughly 150-260 words across 2-3 paragraphs. No markdown, no headings, no bullet points in the output - flowing prose only.
+${DESCRIPTION_NO_HALLUCINATION_RULES}
+${DESCRIPTION_STRUCTURE_RULES}
+- No markdown, no headings, no bullet points in the output - flowing prose only.
 
 Property Details:
 - Title: ${getSafe(property, "title", "N/A")}
@@ -249,6 +286,130 @@ Verified Nearby Places: ${nearbySection ? "the ONLY nearby places you are allowe
 ${nearbySection || "Do not mention proximity to ANY school, hospital, market, mosque/place of worship, park, station, bazaar, or other amenity anywhere in the description - there is no verified nearby-places data for this property."}
 
 STRICT OUTPUT CONSTRAINT (read this last, it overrides anything above): the "Verified Nearby Places" list above is the complete and only set of nearby places that exist for this task. Do not name, hint at, or invent any other nearby place, amenity, distance, or travel time under any name (no "Hospital A/B/C", no "a local bazaar", no "a nearby mosque", no "a park nearby") beyond exactly what is listed there. If that list is empty, the description must contain zero references to nearby places, distances, or travel times of any kind.`;
+}
+
+// ─── Enhancement prompt: merge the seller's own draft with confirmed listing
+// data into ONE polished description - see enhanceDescription() below for
+// the full "seller text is primary source of truth, no hallucination" rules
+// this implements. ────────────────────────────────────────────────────────
+function buildEnhancementPrompt(sellerText, property, nearbyHighlights, lang) {
+  const { featureLines, locationParts } = buildFactLines(property);
+  const isLandOrCommercial =
+    property.propertyType === "land" || property.propertyType === "commercial";
+  const nearbySection = formatNearbyHighlightsForPrompt(nearbyHighlights);
+  const languageLabel = lang === "bn" ? "Bengali (Bangla script)" : "English";
+
+  return `You are an expert real estate copywriter for a Bangladesh property portal. A seller has written their own property description below, and your job is to improve and EXPAND it into ONE coherent, richer, professional description written in ${languageLabel} - genuinely merged and rewritten throughout, never the seller's original unchanged text with a separate AI-written paragraph simply appended after it.
+
+SELLER'S OWN DESCRIPTION (the primary source of truth - every fact stated here must remain represented in your output, though you may reword it for grammar and flow):
+"""
+${sellerText}
+"""
+
+You may ALSO draw on the confirmed listing data below, but only to add a fact that is missing from the seller's text and clearly true - never to contradict or replace what the seller wrote.
+
+Confirmed Listing Data:
+- Property Type: ${getSafe(property, "propertyType", "N/A")}
+- Listing Type: For ${getSafe(property, "listingType", "N/A")}
+- Price: ${
+    property.price ? Number(property.price).toLocaleString() : "N/A"
+  } BDT${property.listingType === "rent" ? " /month" : ""}
+- Size: ${getSafe(property, "area", "N/A")} sqft
+${
+  isLandOrCommercial
+    ? ""
+    : `- Bedrooms: ${getSafe(property, "bedrooms", "N/A")}\n- Bathrooms: ${getSafe(
+        property,
+        "bathrooms",
+        "N/A"
+      )}\n`
+}
+Location: ${locationParts.length > 0 ? locationParts.join(", ") : "N/A"}
+
+Key Features:
+${featureLines.length > 0 ? featureLines.join("\n") : "N/A"}
+
+Verified Nearby Places: ${nearbySection ? "the ONLY nearby places you are allowed to mention, each at most once, using exactly this name and distance:" : "NONE SUPPLIED."}
+${nearbySection || "Do not mention proximity to ANY school, hospital, market, mosque/place of worship, park, station, bazaar, or other amenity anywhere in the description - there is no verified nearby-places data for this property."}
+
+STRICT RULES (these override everything above):
+- Output ONE coherent, genuinely rewritten description, in ${languageLabel} only - never the seller's original sentences left untouched with a separate AI paragraph stuck on afterward, and never a bare list. Writing it as two natural paragraphs (see structure below) is correct and expected - that is NOT the "stitched together" anti-pattern this rule forbids.
+- Preserve every concrete fact the seller stated (room counts, condition, location references, amenities they named). Do not drop or contradict any of them.
+- Expand on the seller's draft using the Confirmed Listing Data and Key Features above wherever they add a real, missing detail - do not just lightly reword the seller's own sentence and stop there if more confirmed, relevant facts are available.
+- Never invent anything not present in the seller's text or the Confirmed Listing Data above - no features, room counts, parking, furnishing, nearby facilities, distances, condition, renovations, views, security, transport access, road conditions, utilities, development opportunity, or investment claims that aren't actually supported.
+- Do not use words like "luxury", "premium", "perfect investment", "prime location", "excellent transport connectivity", or "walking distance" unless the supplied facts genuinely support that specific claim.
+- If the seller's text and the Confirmed Listing Data together still amount to very little, keep the result SHORT and factual (even as few as 40-80 words) rather than padding it with generic filler to reach the target length below - a short truthful description is always better than a longer invented one.
+- Sound professional and natural, not exaggerated. Fix grammar and remove repetition from the seller's draft.
+${DESCRIPTION_STRUCTURE_RULES}
+- Output ONLY the final description text - no preamble, no explanation, no quotation marks, no markdown.`;
+}
+
+// Minimal sanity check on enhancement output - not a translation (same
+// language in and out), so isValidTranslation's cross-script checks don't
+// apply here; this only guards against an empty/garbled/truncated response.
+function isValidEnhancementOutput(text) {
+  if (typeof text !== "string") return false;
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+  if (trimmed.includes("�")) return false;
+  if (trimmed.length < 15) return false;
+  return true;
+}
+
+// ─── "Enhance with AI" entry point (seller-triggered, pre-submission) ──────
+// Takes the seller's current draft text plus whatever confirmed form data
+// has been entered so far (NOT a saved Property document - this runs before
+// the listing is created) and returns ONE merged, polished description, or
+// null if every provider failed/returned something unusable. Callers MUST
+// treat null as "keep the seller's existing text unchanged" - this function
+// never throws and never fabricates a placeholder description.
+async function enhanceDescription(sellerText, property) {
+  const trimmed = (sellerText || "").trim();
+  if (!trimmed) return null;
+
+  const lang = detectLanguage(trimmed);
+  const nearbyHighlights = await getNearbyPOIHighlights(property);
+  const prompt = buildEnhancementPrompt(trimmed, property, nearbyHighlights, lang);
+
+  let text = await callGroq(prompt, 700);
+  if (!text || !isValidEnhancementOutput(text)) {
+    text = await callGemini(prompt);
+  }
+  if (!text || !isValidEnhancementOutput(text)) return null;
+  return text.trim();
+}
+
+// ─── "Enhance with AI" / blank-generate entry point (seller-triggered,
+// pre-submission) - the single function the frontend's Enhance-with-AI
+// button and its auto-generate-before-Continue fallback both call (see
+// useListingForm.js). Branches on whether the seller has written anything:
+//   - non-blank sellerText -> merges it with confirmed listing data via
+//     enhanceDescription() above (seller's facts remain the source of
+//     truth; can return null on provider failure - caller must then
+//     preserve the seller's original text untouched).
+//   - blank sellerText -> generates a fresh, grounded description straight
+//     from confirmed listing data using the SAME chain already used
+//     server-side at listing creation when no manual description was
+//     given (generateEnglishDescription - Groq -> Gemini -> deterministic
+//     template; never throws, always resolves to a non-empty, factual
+//     string, so this branch is guaranteed non-null). `lang` ("en"/"bn",
+//     the app's current UI language) only matters for this branch, since
+//     there's no seller text to detect a language from - translated via
+//     the existing translate() chain, falling back to the English draft
+//     (still real, grounded text) if translation itself fails.
+// ============================================================================
+async function enhanceOrGenerateDescription(sellerText, property, lang) {
+  const trimmed = (sellerText || "").trim();
+  if (trimmed) {
+    return enhanceDescription(trimmed, property);
+  }
+
+  const generated = await generateEnglishDescription(property);
+  if (lang === "bn") {
+    const translated = await translate(generated.text, "bn");
+    if (translated) return translated;
+  }
+  return generated.text;
 }
 
 // ─── Translation prompt (shared by Groq and Gemini) ─────────────────────────
@@ -525,13 +686,22 @@ async function callGemini(prompt) {
 // ─── Last-resort fallback: deterministic local template ────────────────────
 // Zero external services. Only uses fields that are actually present -
 // never prints "undefined"/"null"/empty commas/invented facts.
+// Zero-AI fallback (Groq and Gemini both unreachable) - still follows the
+// same two-paragraph structure as the AI prompts (DESCRIPTION_STRUCTURE_RULES
+// above): paragraph 1 is the property itself, paragraph 2 is location/
+// access/nearby. Deliberately template-based, not AI-written, so it only
+// ever states a fact when the corresponding field is actually present -
+// never invents anything, same guarantee as before this was expanded.
 function buildDeterministicDescription(property, nearbyHighlights) {
   const isLandOrCommercial =
     property.propertyType === "land" || property.propertyType === "commercial";
   const listingWord = property.listingType === "rent" ? "rent" : "sale";
   const typeLabel = property.propertyType || "property";
+  const bd = property.bangladeshDetails || {};
+  const f = property.features || {};
 
-  const sentences = [];
+  // ── Paragraph 1: the property itself ──────────────────────────────────
+  const p1 = [];
 
   const locationParts = [
     property.upazila,
@@ -543,7 +713,7 @@ function buildDeterministicDescription(property, nearbyHighlights) {
   let opening = `This ${typeLabel} is available for ${listingWord}`;
   if (locationStr) opening += ` in ${locationStr}`;
   opening += ".";
-  sentences.push(opening);
+  p1.push(opening);
 
   const sizeDetails = [];
   if (!isLandOrCommercial && property.bedrooms) {
@@ -560,38 +730,94 @@ function buildDeterministicDescription(property, nearbyHighlights) {
     sizeDetails.push(`${property.area} sqft`);
   }
   if (sizeDetails.length > 0) {
-    sentences.push(`It offers ${sizeDetails.join(", ")}.`);
+    p1.push(`It offers ${sizeDetails.join(", ")}.`);
   }
 
   if (property.price) {
     const priceStr = Number(property.price).toLocaleString();
-    sentences.push(
+    p1.push(
       `Priced at ${priceStr} BDT${
         property.listingType === "rent" ? " per month" : ""
       }.`
     );
   }
 
+  if (bd.propertyCondition) {
+    const conditionLabel = {
+      new: "newly built",
+      under_construction: "under construction",
+      resale: "a resale",
+    }[bd.propertyCondition];
+    if (conditionLabel) p1.push(`It is ${conditionLabel}.`);
+  }
+
   const featureNames = [];
-  const f = property.features || {};
   if (f.furnished && f.furnished !== "no")
     featureNames.push(`${f.furnished === "full" ? "fully" : "semi"} furnished`);
   if (f.parking) featureNames.push("parking");
   if (f.garden) featureNames.push("a garden");
   if (f.airConditioning) featureNames.push("air conditioning");
   if (f.pool) featureNames.push("a pool");
+  if (bd.balcony === "yes") featureNames.push("a balcony");
+  if (bd.rooftopAccess === "yes") featureNames.push("rooftop access");
   if (featureNames.length > 0) {
-    sentences.push(`The property includes ${featureNames.join(", ")}.`);
+    p1.push(`The property includes ${featureNames.join(", ")}.`);
   }
 
-  const bd = property.bangladeshDetails || {};
+  const utilityNames = [];
+  if (bd.waterSource) {
+    const waterLabel = { wasa: "WASA water", deep_tube_well: "a deep tube well", both: "WASA and a deep tube well", other: "a water supply" }[bd.waterSource];
+    if (waterLabel) utilityNames.push(waterLabel);
+  }
+  if (bd.gasSource && bd.gasSource !== "none") {
+    const gasLabel = { piped: "piped gas", cylinder: "cylinder gas" }[bd.gasSource];
+    if (gasLabel) utilityNames.push(gasLabel);
+  }
+  if (bd.backupPower && bd.backupPower !== "none") {
+    const powerLabel = { ips: "IPS backup power", generator: "generator backup power", solar: "solar backup power" }[bd.backupPower];
+    if (powerLabel) utilityNames.push(powerLabel);
+  }
+  if (utilityNames.length > 0) {
+    p1.push(`Utilities include ${utilityNames.join(", ")}.`);
+  }
+
+  if (Array.isArray(bd.securityFeatures) && bd.securityFeatures.length > 0) {
+    const securityLabel = { gated: "a gated community", guards: "security guards", cctv: "CCTV" };
+    const names = bd.securityFeatures.map((s) => securityLabel[s]).filter(Boolean);
+    if (names.length > 0) p1.push(`Security includes ${names.join(", ")}.`);
+  }
+
+  if (bd.ownershipPapers === "clear") {
+    p1.push("Ownership papers are clear.");
+  }
+
+  // ── Paragraph 2: location, access, and nearby information ─────────────
+  const p2 = [];
+
+  if (property.addressLine1) {
+    p2.push(`The property is located at ${property.addressLine1}.`);
+  }
+
+  const accessDetails = [];
+  if (bd.proximityToMainRoad) accessDetails.push(bd.proximityToMainRoad);
+  if (bd.roadWidth) accessDetails.push(`a ${bd.roadWidth} wide road`);
+  if (accessDetails.length > 0) {
+    p2.push(`It has ${accessDetails.join(" and ")}.`);
+  }
+
+  if (bd.naturalLight) {
+    p2.push(`Natural light/ventilation is described as ${bd.naturalLight}.`);
+  }
+
   const nearby = [
     bd.nearbySchools && `schools (${bd.nearbySchools})`,
     bd.nearbyHospitals && `hospitals (${bd.nearbyHospitals})`,
     bd.nearbyMarkets && `markets (${bd.nearbyMarkets})`,
+    bd.nearbyReligiousPlaces && `religious places (${bd.nearbyReligiousPlaces})`,
+    bd.nearbyOthers && `other amenities (${bd.nearbyOthers})`,
   ].filter(Boolean);
   if (nearby.length > 0) {
-    sentences.push(`Nearby: ${nearby.join(", ")}.`);
+    p2.push(`Nearby: ${nearby.join(", ")}.`);
   }
 
   // Verified real nearby places (poiService, see getNearbyPOIHighlights) -
@@ -601,14 +827,11 @@ function buildDeterministicDescription(property, nearbyHighlights) {
     const poiPhrases = nearbyHighlights.map(
       (h) => `${h.name} (${h.label.toLowerCase()}, ~${h.distanceMeters}m away)`
     );
-    sentences.push(`Also close by: ${poiPhrases.join(", ")}.`);
+    p2.push(`Also close by: ${poiPhrases.join(", ")}.`);
   }
 
-  if (property.addressLine1) {
-    sentences.push(`Address: ${property.addressLine1}.`);
-  }
-
-  return sentences.join(" ");
+  const paragraphs = [p1.join(" "), p2.join(" ")].filter((p) => p.trim());
+  return paragraphs.join("\n\n");
 }
 
 // ─── Generation provider chain ──────────────────────────────────────────────
@@ -730,4 +953,6 @@ module.exports = {
   buildDeterministicDescription,
   isValidTranslation,
   getNearbyPOIHighlights,
+  enhanceDescription,
+  enhanceOrGenerateDescription,
 };

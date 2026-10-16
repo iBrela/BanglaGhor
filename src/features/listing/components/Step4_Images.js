@@ -214,7 +214,7 @@ const Step4_Images = ({
       >
         {t(
           "image_upload_caption_s3",
-          "Upload up to 10 images (JPEG, PNG, WEBP format, max 10MB each). Images are stored securely. The first image will be the main cover image."
+          "Upload up to 10 images (JPEG, PNG, WEBP format, max 10MB each). At least one photo is required. Images are stored securely, and the first image will be the main cover image."
         )}
       </Typography>
     </Box>
