@@ -38,34 +38,39 @@ router.post(
   fetchUserProfileMiddleware, 
   [
     
-    body("title").notEmpty().trim().escape().withMessage("Title is required."), //
+    // .escape() deliberately NOT used on title/address fields below - it
+    // HTML-entity-encodes the stored value (e.g. "Road No. 9/A" becomes
+    // "Road No. 9&#x2F;A" in the database), which then renders as that raw,
+    // unreadable entity text everywhere the property is displayed, since
+    // nothing in this app's frontend ever decodes it back (confirmed: zero
+    // uses of dangerouslySetInnerHTML anywhere in src/ - every field is
+    // rendered as plain React text, which already safely escapes markup on
+    // its own). .escape() here only corrupted legitimate punctuation
+    // (slashes, ampersands, apostrophes) in real addresses/titles without
+    // adding any actual XSS protection beyond what React already provides.
+    body("title").notEmpty().trim().withMessage("Title is required."), //
     body("price").isNumeric().withMessage("Price must be a number.").toFloat(), //
 
     body("addressLine1") //
       .notEmpty()
       .trim()
-      .escape()
       .withMessage("Address Line 1 is required."),
-    body("addressLine2").optional().trim().escape(), //
+    body("addressLine2").optional().trim(), //
     body("cityTown") //
       .notEmpty()
       .trim()
-      .escape()
       .withMessage("City/Town is required."),
     body("upazila") //
       .notEmpty()
       .trim()
-      .escape()
       .withMessage("Upazila is required."),
     body("district") //
       .notEmpty()
       .trim()
-      .escape()
       .withMessage("District is required."),
     body("postalCode") //
       .notEmpty()
       .trim()
-      .escape()
       .withMessage("Postal Code is required."),
 
     
@@ -259,11 +264,12 @@ router.put(
   fetchUserProfileMiddleware, // <<<< ADD THIS if updates depend on user profile or for ownership checks
   [
     param("id").isMongoId().withMessage("Invalid property ID format."), //
+    // .escape() intentionally not used here either - see the matching
+    // comment on the create-property validator above.
     body("title") //
       .optional()
       .notEmpty()
       .trim()
-      .escape()
       .withMessage("Title cannot be empty if provided."),
     body("price") //
       .optional()
@@ -274,13 +280,11 @@ router.put(
       .optional()
       .notEmpty()
       .trim()
-      .escape()
       .withMessage("Address Line 1 cannot be empty if provided."),
     body("cityTown") //
       .optional()
       .notEmpty()
       .trim()
-      .escape()
       .withMessage("City/Town cannot be empty if provided."),
     body("isHidden") //
       .optional()

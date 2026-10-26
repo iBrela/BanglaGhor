@@ -26,6 +26,37 @@
 
 import { divisionCenters } from "../constants/divisionCenters";
 
+// ============================================================================
+// formatPropertyAddress — joins a property's address parts (addressLine1,
+// addressLine2, upazila, cityTown, district, postalCode) into one display
+// string, skipping a part whenever its text is already present (case-
+// insensitive substring match) in what's been accumulated so far.
+//
+// Why this is needed: addressLine1 from the address-autocomplete selection
+// path is already a full, multi-part display string (e.g. "House 11, Road
+// 62, Gulshan 2, Dhaka, Bangladesh, Dhaka, Dhaka Metropolitan, Dhaka
+// Division" - see locationService.js's normalizePhotonFeature), so naively
+// appending the separately-stored upazila/cityTown/district fields after it
+// visibly repeats "Gulshan", "Dhaka", "Dhaka Metropolitan" a second time.
+// This is presentation-only - it never changes what's stored, only how the
+// already-stored parts are joined for display, so it's safe to use anywhere
+// the per-field address pieces are currently just .filter(Boolean).join(", ")'d.
+// ============================================================================
+export function formatPropertyAddress(parts) {
+  const accumulated = [];
+  let joinedSoFarLower = "";
+  for (const raw of parts) {
+    if (!raw) continue;
+    const part = String(raw).trim();
+    if (!part) continue;
+    const partLower = part.toLowerCase();
+    if (joinedSoFarLower.includes(partLower)) continue;
+    accumulated.push(part);
+    joinedSoFarLower = accumulated.join(", ").toLowerCase();
+  }
+  return accumulated.join(", ");
+}
+
 function toFiniteLatLng(lat, lng) {
   if (
     typeof lat !== "number" ||

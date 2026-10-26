@@ -63,7 +63,7 @@ import { useAuth } from "../../../context/AuthContext";
 import useWishlist from "./../hooks/useWishlist";
 import { initiateOrGetConversation } from "../../chat/services/chatService";
 import { useSnackbar } from "../../../context/SnackbarContext";
-import { getPropertyDisplayCoordinates } from "../../../shared/propertyLocation";
+import { getPropertyDisplayCoordinates, formatPropertyAddress } from "../../../shared/propertyLocation";
 import { getDisplayDescription } from "../../../shared/propertyDescription";
 import { normalizeLang } from "../../../shared/language";
  
@@ -105,17 +105,15 @@ const constructLocationString = (property) => {
   if (!property) return "Location unavailable";
   if (property.address) return property.address;
   if (property.location) return property.location;
-  const locationParts = [
+  const formatted = formatPropertyAddress([
     property.addressLine1,
     property.addressLine2,
     property.upazila,
     property.cityTown,
     property.district,
     property.postalCode,
-  ].filter(Boolean);
-  return locationParts.length > 0
-    ? locationParts.join(", ")
-    : "Location details not available";
+  ]);
+  return formatted || "Location details not available";
 };
  
 const getLocationAccuracyInfo = (accuracy) => {

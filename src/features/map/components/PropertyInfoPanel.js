@@ -34,7 +34,7 @@ import CloseIcon from "@mui/icons-material/Close";
 import { useNavigate } from "react-router-dom";
 import { useTheme, alpha } from "@mui/material/styles";
 import { useTranslation } from "react-i18next";
-import { getPropertyCoordinates } from "../../../shared/propertyLocation";
+import { getPropertyCoordinates, formatPropertyAddress } from "../../../shared/propertyLocation";
 
 /**
  * Helper to format price with consistent display
@@ -58,18 +58,16 @@ const constructLocationString = (property) => {
   
   if (property.location) return property.location;
   
-  const locationParts = [
+  const formatted = formatPropertyAddress([
     property.addressLine1,
     property.addressLine2,
     property.upazila,
     property.cityTown,
     property.district,
     property.postalCode,
-  ].filter(Boolean);
-  
-  return locationParts.length > 0 
-    ? locationParts.join(", ") 
-    : "Location details not available";
+  ]);
+
+  return formatted || "Location details not available";
 };
 
 /**

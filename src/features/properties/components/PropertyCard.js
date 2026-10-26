@@ -23,7 +23,7 @@ import HomeWorkIcon from "@mui/icons-material/HomeWork";
 import MapIcon from "@mui/icons-material/Map";
 import BookmarkRemoveIcon from "@mui/icons-material/BookmarkRemove";
 import WishlistButton from "./WishlistButton";
-import { getPropertyCoordinates } from "../../../shared/propertyLocation";
+import { getPropertyCoordinates, formatPropertyAddress } from "../../../shared/propertyLocation";
 
 // showViewOnMap and onUntrack are both optional, off by default - only the
 // callers that need them (FeaturedProperties.js for showViewOnMap,
@@ -130,9 +130,12 @@ const PropertyCard = ({
   }
  
   const locationString =
-    [property.addressLine1, property.upazila, property.cityTown, property.district]
-      .filter(Boolean)
-      .join(", ") || "Location N/A";
+    formatPropertyAddress([
+      property.addressLine1,
+      property.upazila,
+      property.cityTown,
+      property.district,
+    ]) || "Location N/A";
  
   const detailUrl = `/properties/details/${property._id}`;
   const isLandOrCommercial =
